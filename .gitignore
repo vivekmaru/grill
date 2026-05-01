@@ -1,0 +1,12 @@
+node_modeuls/
+.env/
+dist/
+build/
+coverage/
+*.log
+*.tmp
+.DS_Store
+.idea/
+.vscode/
+.claude/
+plan-sequence.md
