@@ -99,3 +99,21 @@ describe('Resume', () => {
     ).toThrow()
   })
 })
+
+describe('Bullet with flags', () => {
+  it('parses a flagged bullet', () => {
+    const b = Bullet.parse({
+      id: 'b1',
+      text: 'collaborated with team',
+      status: 'flagged',
+      flags: [{
+        flag: 'vague',
+        severity: 2,
+        span: 'collaborated',
+        why: 'Vague verb.',
+        suggestedQuestion: 'What did collaboration look like?',
+      }],
+    })
+    expect(b.flags[0]?.dismissed).toBe(false)
+  })
+})

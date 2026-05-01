@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { FlagInstance } from './flags'
 
 export const ImpactMetric = z.object({
   value: z.string(),
@@ -7,17 +8,13 @@ export const ImpactMetric = z.object({
   verified: z.boolean(),
 })
 
-// FlagInstance schema is added in Task 6 once flags.ts exists.
-// For now, Bullet carries an empty-array placeholder typed as unknown[].
-const FlagInstancePlaceholder = z.array(z.unknown())
-
 export const Bullet = z.object({
   id: z.string(),
   text: z.string(),
   metrics: z.array(ImpactMetric).default([]),
   skills: z.array(z.string()).default([]),
   impactScore: z.number().min(0).max(10).optional(),
-  flags: FlagInstancePlaceholder.default([]),
+  flags: z.array(FlagInstance).default([]),
   sourceTurnIds: z.array(z.string()).default([]),
   status: z.enum(['draft', 'flagged', 'refined', 'accepted']),
 })
