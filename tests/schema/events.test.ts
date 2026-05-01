@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { Event } from '@/schema/events'
 
 describe('Event', () => {

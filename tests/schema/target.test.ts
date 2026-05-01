@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { Archetype, Tone, Persona, TargetContext } from '@/schema/target'
 
 describe('Archetype', () => {
@@ -21,7 +21,7 @@ describe('Archetype', () => {
 
 describe('Tone', () => {
   it('accepts the four documented tones', () => {
-    for (const t of ['skeptical', 'curious', 'adversarial', 'coaching']) {
+    for (const t of ['skeptical', 'curious', 'adversarial', 'coaching'] as const) {
       expect(Tone.parse(t)).toBe(t)
     }
   })

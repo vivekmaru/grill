@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { Bullet, ImpactMetric, Resume, Role, Project, Education } from '@/schema/resume'
 
 describe('ImpactMetric', () => {
