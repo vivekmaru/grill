@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { Bullet, ImpactMetric } from '@/schema/resume'
+import { Bullet, ImpactMetric, Resume, Role, Project, Education } from '@/schema/resume'
 
 describe('ImpactMetric', () => {
   it('parses a verified percentage metric', () => {
@@ -37,6 +37,65 @@ describe('Bullet', () => {
   it('rejects status outside the allowed set', () => {
     expect(() =>
       Bullet.parse({ id: 'b1', text: 'x', status: 'finished' }),
+    ).toThrow()
+  })
+})
+
+describe('Role', () => {
+  it('parses a current role with null endDate', () => {
+    const r = Role.parse({
+      id: 'r1',
+      company: 'Acme',
+      title: 'Engineer',
+      startDate: '2022-01',
+      endDate: null,
+      bullets: [],
+    })
+    expect(r.endDate).toBeNull()
+  })
+})
+
+describe('Education', () => {
+  it('parses with optional fields omitted', () => {
+    const e = Education.parse({
+      id: 'e1',
+      institution: 'MIT',
+      degree: 'BSc',
+    })
+    expect(e.highlights).toEqual([])
+  })
+})
+
+describe('Project', () => {
+  it('rejects a malformed url', () => {
+    expect(() =>
+      Project.parse({
+        id: 'p1',
+        name: 'X',
+        url: 'not-a-url',
+        description: 'd',
+        bullets: [],
+      }),
+    ).toThrow()
+  })
+})
+
+describe('Resume', () => {
+  it('parses a minimal resume', () => {
+    const r = Resume.parse({
+      version: 1,
+      contact: { name: 'Vivek' },
+      roles: [],
+    })
+    expect(r.education).toEqual([])
+    expect(r.projects).toEqual([])
+    expect(r.skills).toEqual({ categories: [] })
+    expect(r.certifications).toEqual([])
+  })
+
+  it('rejects a wrong version literal', () => {
+    expect(() =>
+      Resume.parse({ version: 2, contact: { name: 'x' }, roles: [] }),
     ).toThrow()
   })
 })
