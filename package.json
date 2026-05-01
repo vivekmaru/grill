@@ -1,0 +1,22 @@
+{
+  "name": "resume-builder",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot src/server/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "build": "echo 'see sub-plan 7' && exit 1"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
