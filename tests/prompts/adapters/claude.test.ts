@@ -294,3 +294,52 @@ describe('createClaudeAdapter — onToken streaming', () => {
     ).resolves.toBeDefined()
   })
 })
+
+describe('createClaudeAdapter — session resume', () => {
+  it('omits --resume on first call when sessionHandle is null', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's-new' }) + '\n',
+          JSON.stringify({ type: 'result', structured_output: { ok: true, value: 1 } }) + '\n',
+        ],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    const out = await adapter.callInSession({
+      sessionHandle: null,
+      tier: 'main',
+      systemPrompt: 's',
+      userPrompt: 'u',
+      schema: Sample,
+    })
+    expect(mock.calls[0]!.cmd).not.toContain('--resume')
+    expect(out.sessionHandle).toBe('s-new')
+  })
+
+  it('passes --resume <sessionHandle> on subsequent calls', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's-resumed' }) + '\n',
+          JSON.stringify({ type: 'result', structured_output: { ok: true, value: 2 } }) + '\n',
+        ],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    const out = await adapter.callInSession({
+      sessionHandle: 'sess-from-earlier',
+      tier: 'main',
+      systemPrompt: 's',
+      userPrompt: 'u',
+      schema: Sample,
+    })
+    const cmd = mock.calls[0]!.cmd
+    expect(cmd).toContain('--resume')
+    const resumeIdx = cmd.indexOf('--resume')
+    expect(cmd[resumeIdx + 1]).toBe('sess-from-earlier')
+    expect(out.sessionHandle).toBe('s-resumed')
+  })
+})
