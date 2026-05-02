@@ -224,3 +224,73 @@ describe('createClaudeAdapter — JSON-island fallback', () => {
     expect(out.result).toEqual({ ok: false, value: 3 })
   })
 })
+
+describe('createClaudeAdapter — onToken streaming', () => {
+  it('forwards each stream_event delta text to onToken in order', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\n',
+          JSON.stringify({
+            type: 'stream_event',
+            event: { delta: { type: 'text_delta', text: 'Hel' } },
+          }) + '\n',
+          JSON.stringify({
+            type: 'stream_event',
+            event: { delta: { type: 'text_delta', text: 'lo ' } },
+          }) + '\n',
+          JSON.stringify({
+            type: 'stream_event',
+            event: { delta: { type: 'text_delta', text: 'world' } },
+          }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: true, value: 1 },
+          }) + '\n',
+        ],
+      },
+    ])
+    const tokens: string[] = []
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    await adapter.callInSession({
+      sessionHandle: null,
+      tier: 'main',
+      systemPrompt: 's',
+      userPrompt: 'u',
+      schema: Sample,
+      onToken: (chunk) => tokens.push(chunk),
+    })
+    expect(tokens).toEqual(['Hel', 'lo ', 'world'])
+  })
+
+  it('does not call onToken if not provided (no error)', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\n',
+          JSON.stringify({
+            type: 'stream_event',
+            event: { delta: { type: 'text_delta', text: 'x' } },
+          }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: true, value: 1 },
+          }) + '\n',
+        ],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    await expect(
+      adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: 's',
+        userPrompt: 'u',
+        schema: Sample,
+        // no onToken
+      }),
+    ).resolves.toBeDefined()
+  })
+})

@@ -65,6 +65,7 @@ interface CallResult {
 
 async function consumeStream(
   proc: SubprocessLike,
+  onToken: ((chunk: string) => void) | undefined,
 ): Promise<CallResult> {
   let sessionId: string | null = null
   let resultText = ''
@@ -93,6 +94,9 @@ async function consumeStream(
         sessionId = evt.session_id
       } else if (evt.type === 'system' && evt.subtype === 'api_retry') {
         console.warn(`[claude adapter] api_retry: ${trimmed}`)
+      } else if (evt.type === 'stream_event') {
+        const text = evt.event?.delta?.text
+        if (text && onToken) onToken(text)
       } else if (evt.type === 'result') {
         if (evt.structured_output !== undefined) {
           structuredOutput = evt.structured_output
@@ -133,6 +137,7 @@ export function createClaudeAdapter(
       systemPrompt,
       userPrompt,
       schema,
+      onToken,
     }) {
       const jsonSchema = zodToJsonSchema(schema as ZodSchema<unknown>)
 
@@ -149,7 +154,7 @@ export function createClaudeAdapter(
         proc.stdin.write(prompt)
         proc.stdin.end()
 
-        const drained = await consumeStream(proc)
+        const drained = await consumeStream(proc, onToken)
         const exitCode = await proc.exited
         if (exitCode !== 0) {
           throw new AdapterError(
