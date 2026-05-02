@@ -469,6 +469,7 @@ export class Session {
         bullet.text = args.newText
         return r
       })
+      this.applyEvent({ type: 'EDIT_RESUME', patch: [] })
     })()
   }
 

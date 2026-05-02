@@ -144,3 +144,17 @@ Phase: 2 (spec).
 **Cleaner pattern (deferred):** plumb the AbortSignal into a dedicated abort-promise that rejects on signal and let `consumeStream` race against THAT, not against `proc.exited`. Keeps the success path uncomplicated. Worth doing during a future cleanup pass.
 
 Phase: 2b.
+
+---
+
+## 2026-05-02 — `EDIT_RESUME` permitted during critique
+
+**Decision:** `EDIT_RESUME` was originally scoped to the `'edit'` state only (post-`PICK_TEMPLATE`). Added it to `'critique'`'s allowed events so `Session.editBullet` can fire it during the interrogation phase.
+
+**Why:** spec §4 lets the user manually rewrite a bullet during critique (alongside accept/skip/dismiss). Previously the call site dropped the event to avoid the reducer throwing, which left the resume snapshot ahead of the event log — `Session.load → replay()` would lose the manual edit on reload. Allowing the event in `'critique'` keeps event-sourcing intact: the `resumes` row is the cache, the `history` table is the source of truth.
+
+**Reducer behaviour:** `EDIT_RESUME` from `'critique'` falls through to `return 'critique'` (no transition). Same when fired from `'edit'`. This is intentional — `EDIT_RESUME` is a within-state mutation.
+
+**`patch` field:** still empty `[]` in v2. Sub-plan 6 (CodeMirror) replaces this with RFC 6902 patches; until then `replay()` reconstructs the mutation by re-applying the persisted `resumes` row, not by walking patches. Acceptable while the snapshot is the canonical store.
+
+Phase: 2c.
