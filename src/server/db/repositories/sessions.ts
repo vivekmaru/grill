@@ -11,6 +11,8 @@ export interface StoredSession {
   modelCallsMade: number
   allowExtraUsage: boolean
   sessionHandle: string | null
+  targetContext: unknown | null
+  persona: unknown | null
   createdAt: number
   updatedAt: number
 }
@@ -24,6 +26,8 @@ export interface SessionRepo {
   setAllowExtraUsage(id: number, value: boolean): void
   setSessionHandle(id: number, handle: string): void
   setActiveResume(id: number, resumeId: number): void
+  setTargetContext(id: number, ctx: unknown): void
+  setPersona(id: number, persona: unknown): void
 }
 
 interface SessionRow {
@@ -35,6 +39,8 @@ interface SessionRow {
   model_calls_made: number
   allow_extra_usage: number
   session_handle: string | null
+  target_context_json: string | null
+  persona_json: string | null
   created_at: number
   updated_at: number
 }
@@ -49,6 +55,8 @@ function rowToSession(row: SessionRow): StoredSession {
     modelCallsMade: row.model_calls_made,
     allowExtraUsage: Boolean(row.allow_extra_usage),
     sessionHandle: row.session_handle,
+    targetContext: row.target_context_json ? JSON.parse(row.target_context_json) : null,
+    persona: row.persona_json ? JSON.parse(row.persona_json) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -81,6 +89,12 @@ export function createSessionRepo(db: Database): SessionRepo {
   )
   const updActiveResume = db.query<unknown, [number, number, number]>(
     `UPDATE sessions SET active_resume_id = ?, updated_at = ? WHERE id = ?`,
+  )
+  const updTargetContext = db.query<unknown, [string, number, number]>(
+    `UPDATE sessions SET target_context_json = ?, updated_at = ? WHERE id = ?`,
+  )
+  const updPersona = db.query<unknown, [string, number, number]>(
+    `UPDATE sessions SET persona_json = ?, updated_at = ? WHERE id = ?`,
   )
 
   return {
@@ -115,6 +129,12 @@ export function createSessionRepo(db: Database): SessionRepo {
     },
     setActiveResume(id, resumeId) {
       updActiveResume.run(resumeId, Date.now(), id)
+    },
+    setTargetContext(id, ctx) {
+      updTargetContext.run(JSON.stringify(ctx), Date.now(), id)
+    },
+    setPersona(id, persona) {
+      updPersona.run(JSON.stringify(persona), Date.now(), id)
     },
   }
 }

@@ -51,4 +51,29 @@ describe('SessionRepo', () => {
     repo.setAllowExtraUsage(id, true)
     expect(repo.get(id)?.allowExtraUsage).toBe(true)
   })
+
+  it('setTargetContext stores and retrieves the JSON blob', () => {
+    const id = repo.create({ state: 'ingest' })
+    const ctx = {
+      targetRole: 'Staff Engineer',
+      targetSeniority: 'staff',
+      persona: { archetype: 'engineering-manager', tone: 'skeptical' },
+    }
+    repo.setTargetContext(id, ctx)
+    expect(repo.get(id)?.targetContext).toEqual(ctx)
+  })
+
+  it('setPersona stores and retrieves the persona', () => {
+    const id = repo.create({ state: 'ingest' })
+    const persona = { archetype: 'vp-product', tone: 'curious' }
+    repo.setPersona(id, persona)
+    expect(repo.get(id)?.persona).toEqual(persona)
+  })
+
+  it('initial get returns null for targetContext and persona', () => {
+    const id = repo.create({ state: 'ingest' })
+    const s = repo.get(id)
+    expect(s?.targetContext).toBeNull()
+    expect(s?.persona).toBeNull()
+  })
 })
