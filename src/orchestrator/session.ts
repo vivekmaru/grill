@@ -558,7 +558,7 @@ export class Session {
   }
 
   endInterrogation(): void {
-    throw new Error('not yet implemented')
+    this.applyEvent({ type: 'END_INTERROGATION' })
   }
 
   /** Locate a bullet across roles and projects by id. */

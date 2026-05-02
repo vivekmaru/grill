@@ -425,3 +425,63 @@ describe('Session — proposeRewrites', () => {
     ).rejects.toThrow(/out of range/)
   })
 })
+
+describe('Session — endInterrogation', () => {
+  it('transitions to generate state from critique', async () => {
+    const stub = createStubAdapter([
+      { type: 'ok', value: sampleResumeJson },
+    ])
+    const session = Session.create(createDb(':memory:'), stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+    expect(session.snapshot().state).toBe('critique')
+
+    session.endInterrogation()
+    expect(session.snapshot().state).toBe('generate')
+  })
+
+  it('throws if state does not allow it', () => {
+    const stub = createStubAdapter([])
+    const session = Session.create(createDb(':memory:'), stub.adapter)
+    // state is 'ingest' — END_INTERROGATION not allowed
+    expect(() => session.endInterrogation()).toThrow(/not allowed/)
+  })
+})
+
+describe('Session — end-to-end happy path', () => {
+  it('runs the full flow: ingest → setTarget → critique → editBullet → endInterrogation', async () => {
+    const db = createDb(':memory:')
+    const stub = createStubAdapter([
+      { type: 'ok', value: sampleResumeJson }, // ingest
+      {
+        type: 'ok',
+        value: {
+          flags: [],
+          passSummary: { bulletsScanned: 1, bulletsFlagged: 0, topConcern: '' },
+        },
+      }, // critique
+    ])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+    expect(session.snapshot().state).toBe('critique')
+
+    const events: string[] = []
+    for await (const evt of session.runCritique()) {
+      events.push((evt as { type: string }).type)
+    }
+    expect(events).toContain('started')
+    expect(events).toContain('done')
+
+    const realId = session.currentResume().roles[0]!.bullets[0]!.id
+    session.editBullet({ bulletId: realId, newText: 'Manually polished' })
+    expect(session.currentResume().roles[0]!.bullets[0]!.text).toBe(
+      'Manually polished',
+    )
+
+    session.endInterrogation()
+    expect(session.snapshot().state).toBe('generate')
+
+    expect(session.snapshot().modelCallsMade).toBe(2)
+  })
+})
