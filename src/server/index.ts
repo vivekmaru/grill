@@ -3,6 +3,7 @@ import packageJson from '../../package.json' with { type: 'json' }
 import type { AppDeps } from './deps'
 import { sessionsRoutes } from './routes/sessions'
 import { critiqueRoutes } from './routes/critique'
+import { flagsRoutes } from './routes/flags'
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono()
@@ -13,6 +14,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.route('/api/sessions', sessionsRoutes(deps))
   app.route('/api/sessions', critiqueRoutes(deps))
+  app.route('/api/sessions', flagsRoutes(deps))
 
   return app
 }
