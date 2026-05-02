@@ -248,7 +248,9 @@ export class Session {
     this.applyEvent({ type: 'BEGIN_CRITIQUE' })
   }
 
-  async *runCritique(): AsyncIterable<CritiqueEvent> {
+  async *runCritique(
+    opts?: { signal?: AbortSignal },
+  ): AsyncIterable<CritiqueEvent> {
     if (this.state !== 'critique') {
       throw new Error(
         `runCritique requires state 'critique', got '${this.state}'`,
@@ -300,6 +302,7 @@ export class Session {
         systemPrompt: personaPrompt,
         userPrompt,
         schema: CritiqueScanOutput,
+        signal: opts?.signal,
       })
       parsed = out.result
     } catch (e) {

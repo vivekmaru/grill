@@ -485,3 +485,29 @@ describe('Session — end-to-end happy path', () => {
     expect(session.snapshot().modelCallsMade).toBe(2)
   })
 })
+
+describe('Session — runCritique signal pass-through', () => {
+  it('accepts AbortSignal without breaking the happy path', async () => {
+    const db = createDb(':memory:')
+    const stub = createStubAdapter([
+      { type: 'ok', value: sampleResumeJson },
+      {
+        type: 'ok',
+        value: {
+          flags: [],
+          passSummary: { bulletsScanned: 0, bulletsFlagged: 0, topConcern: '' },
+        },
+      },
+    ])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+
+    const ac = new AbortController()
+    const events: string[] = []
+    for await (const evt of session.runCritique({ signal: ac.signal })) {
+      events.push((evt as { type: string }).type)
+    }
+    expect(events).toContain('done')
+  })
+})
