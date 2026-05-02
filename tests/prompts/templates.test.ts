@@ -80,6 +80,27 @@ describe('templates', () => {
     })
   })
 
+  describe('ingest-markdown.md', () => {
+    const tpl = readTemplate('ingest-markdown.md')
+
+    it('contains the expected slots', () => {
+      expect(tpl).toContain('{{markdown}}')
+      expect(tpl).toContain('{{output_schema}}')
+    })
+
+    it('contains the no-invention hard rule', () => {
+      expect(tpl).toContain('Do NOT invent')
+    })
+
+    it('specifies ISO YYYY-MM date format', () => {
+      expect(tpl).toContain('YYYY-MM')
+    })
+
+    it('sets default status to draft', () => {
+      expect(tpl.toLowerCase()).toContain('"draft"')
+    })
+  })
+
   describe('persona-system.md', () => {
     const tpl = readTemplate('persona-system.md')
 
