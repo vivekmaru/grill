@@ -194,3 +194,39 @@ Phase: 2c.
 **Side effect:** the `id` fields the LLM produces are entirely ignored. The ingest-markdown template tells the model that "id fields can be any string — they will be replaced after parsing."
 
 Phase: 2c.
+
+---
+
+## 2026-05-03 — App composition: single-adapter `createApp({ db, adapter })`
+
+**Decision:** `createApp` accepts `{ db, adapter }` — one DB, one provider adapter, both built once at startup. Tests inject a stub adapter via the same shape.
+
+**Why:** v2 ships single-provider (Claude). A factory or per-request adapter would solve a problem we don't have. Restart the process to swap providers; sub-plan 4 introduces the adapter-pick UX.
+
+**When this would change:** sub-plan 4 if multiple providers are configured concurrently. The adapter would become `Map<ProviderName, ProviderAdapter>` and route handlers would pick by `session.provider`. Migration is mechanical.
+
+Phase: 2d.
+
+---
+
+## 2026-05-03 — Per-request `Session.load`, no in-memory pool
+
+**Decision:** Every route that operates on an existing session calls `Session.load(db, adapter, id)`. No process-wide cache of `Session` instances.
+
+**Why:** localhost single-user; no concurrency hazard. `Session.load` is cheap (one DB read, one history replay). A pool would add cache-invalidation complexity (multi-tab sessions, stale state on background mutations) for no measurable win.
+
+**When this would change:** if profiling shows replay cost dominating route latency on long histories, switch to a small per-process LRU keyed by session id with a write-through invalidation on every mutation.
+
+Phase: 2d.
+
+---
+
+## 2026-05-03 — Route layer is a thin protocol-translation seam
+
+**Decision:** Routes do four things only: (1) extract path/body params, (2) Zod-validate, (3) call exactly one Session method, (4) translate the result/exception to HTTP via `respondWithError`. No business logic in route handlers.
+
+**Why:** the testing strategy depends on this. Session has its own integration tests against a stub adapter; routes have integration tests against an in-memory app. If routes did business logic, both layers would need to know about every domain rule. With the current split, route tests focus on wire format, Session tests focus on domain behavior.
+
+**Implication:** if a route handler reaches for a repo or imports a schema from `@/orchestrator/outputs`, it's drifted from this shape. New domain logic goes in Session.
+
+Phase: 2d.
