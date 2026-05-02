@@ -477,3 +477,42 @@ describe('createClaudeAdapter — error paths', () => {
     })
   })
 })
+
+describe('createClaudeAdapter — abort', () => {
+  it('throws AdapterError(aborted) when AbortSignal fires mid-call', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: true, value: 1 },
+          }) + '\n',
+        ],
+        chunkDelayMs: 50,
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    const ctrl = new AbortController()
+
+    // Fire abort after 5 ms — well before the 50 ms chunk delay completes.
+    setTimeout(() => ctrl.abort(), 5)
+
+    await expect(
+      adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: 's',
+        userPrompt: 'u',
+        schema: Sample,
+        signal: ctrl.signal,
+      }),
+    ).rejects.toMatchObject({
+      name: 'AdapterError',
+      cause: 'aborted',
+    })
+
+    expect(mock.calls[0]!.killed).toBe(true)
+  })
+})

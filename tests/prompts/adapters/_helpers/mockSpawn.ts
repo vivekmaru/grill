@@ -62,6 +62,11 @@ export function createMockSpawn(scripts: MockScript[]): MockSpawn {
     }
     calls.push(callRecord)
 
+    // Honor AbortSignal: when aborted, the subprocess.exited promise rejects
+    // (matching real Bun.spawn behavior with signal). Tests check
+    // callRecord.killed to confirm kill() was called.
+    const signal = (options as { signal?: AbortSignal } | undefined)?.signal
+
     const stdin = {
       write(s: string) {
         callRecord.stdinBuffer += s
@@ -89,12 +94,28 @@ export function createMockSpawn(scripts: MockScript[]): MockSpawn {
     const stderr = buildStream(script.stderrChunks)
 
     let resolveExited: (code: number) => void
-    const exited = new Promise<number>((resolve) => {
+    let rejectExited: (err: Error) => void
+    const exited = new Promise<number>((resolve, reject) => {
       resolveExited = resolve
+      rejectExited = reject
     })
 
     const totalDelay = (script.stdoutChunks.length + (script.stderrChunks?.length ?? 0)) * delayMs
-    setTimeout(() => resolveExited(script.exitCode), totalDelay + 1)
+    const exitTimer = setTimeout(() => resolveExited(script.exitCode), totalDelay + 1)
+
+    // Forward declaration so the abort handler can flip killed.
+    const subprocRef: { killed: boolean } = { killed: false }
+
+    if (signal) {
+      const onAbort = () => {
+        clearTimeout(exitTimer)
+        callRecord.killed = true
+        subprocRef.killed = true
+        rejectExited(new Error('aborted'))
+      }
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    }
 
     const subproc: MockSubprocess = {
       stdin,
@@ -103,10 +124,15 @@ export function createMockSpawn(scripts: MockScript[]): MockSpawn {
       exited,
       kill: () => {
         callRecord.killed = true
-        subproc.killed = true
+        subprocRef.killed = true
       },
-      killed: false,
-    }
+      get killed() {
+        return subprocRef.killed
+      },
+      set killed(v: boolean) {
+        subprocRef.killed = v
+      },
+    } as MockSubprocess
     return subproc
   }
 

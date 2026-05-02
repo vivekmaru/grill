@@ -138,6 +138,7 @@ export function createClaudeAdapter(
       userPrompt,
       schema,
       onToken,
+      signal,
     }) {
       const jsonSchema = zodToJsonSchema(schema as ZodSchema<unknown>)
 
@@ -152,6 +153,7 @@ export function createClaudeAdapter(
             stdin: 'pipe',
             stdout: 'pipe',
             stderr: 'pipe',
+            signal,
           })
         } catch (e) {
           throw new AdapterError(
@@ -159,18 +161,52 @@ export function createClaudeAdapter(
             'spawn-failed',
           )
         }
-        proc.stdin.write(prompt)
-        proc.stdin.end()
 
-        const drained = await consumeStream(proc, onToken)
-        const exitCode = await proc.exited
-        if (exitCode !== 0) {
+        try {
+          proc.stdin.write(prompt)
+          proc.stdin.end()
+        } catch {
+          // stdin may already be closed if abort raced — ignore
+        }
+
+        try {
+          // Race the stream consumer against proc.exited so that an abort
+          // (which rejects proc.exited) surfaces before the stream finishes.
+          const drained = await Promise.race([
+            consumeStream(proc, onToken),
+            proc.exited.then(() => null as unknown as CallResult),
+          ])
+          const exitCode = await proc.exited
+          if (signal?.aborted) {
+            throw new AdapterError('call aborted by signal', 'aborted')
+          }
+          if (exitCode !== 0) {
+            throw new AdapterError(
+              `claude CLI exited with code ${exitCode}`,
+              'cli-error',
+            )
+          }
+          // If exited resolved first (non-null drained means stream won the race)
+          if (drained === null) {
+            // exited resolved before stream — re-drain fully isn't possible,
+            // treat as cli-error
+            throw new AdapterError(
+              `claude CLI exited with code ${exitCode}`,
+              'cli-error',
+            )
+          }
+          return drained
+        } catch (e) {
+          if (signal?.aborted) {
+            try { proc.kill() } catch {}
+            throw new AdapterError('call aborted by signal', 'aborted')
+          }
+          if (e instanceof AdapterError) throw e
           throw new AdapterError(
-            `claude CLI exited with code ${exitCode}`,
+            `unexpected error: ${(e as Error).message}`,
             'cli-error',
           )
         }
-        return drained
       }
 
       const first = await callOnce(userPrompt, sessionHandle)
