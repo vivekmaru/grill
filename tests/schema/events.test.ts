@@ -31,6 +31,10 @@ describe('Event', () => {
     expect(Event.parse({ type: 'END_INTERROGATION' }).type).toBe('END_INTERROGATION')
   })
 
+  it('parses BEGIN_CRITIQUE', () => {
+    expect(Event.parse({ type: 'BEGIN_CRITIQUE' }).type).toBe('BEGIN_CRITIQUE')
+  })
+
   it('rejects unknown event type', () => {
     expect(() => Event.parse({ type: 'DELETE_EVERYTHING' })).toThrow()
   })

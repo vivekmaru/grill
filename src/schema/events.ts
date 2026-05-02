@@ -21,6 +21,7 @@ export const Event = z.discriminatedUnion('type', [
     bulletId: z.string(),
     flagIndex: z.number().int().nonnegative(),
   }),
+  z.object({ type: z.literal('BEGIN_CRITIQUE') }),
   z.object({ type: z.literal('END_INTERROGATION') }),
   z.object({ type: z.literal('PROCEED_TO_GENERATE') }),
   z.object({ type: z.literal('PICK_TEMPLATE'), templateId: z.string() }),
