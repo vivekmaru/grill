@@ -158,3 +158,39 @@ Phase: 2b.
 **`patch` field:** still empty `[]` in v2. Sub-plan 6 (CodeMirror) replaces this with RFC 6902 patches; until then `replay()` reconstructs the mutation by re-applying the persisted `resumes` row, not by walking patches. Acceptable while the snapshot is the canonical store.
 
 Phase: 2c.
+
+---
+
+## 2026-05-02 — v2 ships pseudo-streaming critique
+
+**Decision:** `Session.runCritique` calls the adapter once and gets the full `CritiqueScanOutput` back. It synthesizes per-flag SSE events from the parsed result (yielding `started`, then one `flag` per parsed flag, then `pass-summary`, then `done`). The adapter's `onToken` callback is plumbed through but not used to emit flag events progressively.
+
+**Why:** real progressive streaming would require parsing flags out of the in-flight JSON before the model finishes — complex (partial JSON parser) and brittle (a flag boundary mid-token would break parsing). v2 accepts a slightly less impressive UX for a much simpler implementation.
+
+**When this would change:** sub-plan 6 if user feedback says the all-at-once flag drop feels janky. The `CritiqueEvent` type and SSE protocol already support real progressive streaming — only the orchestrator's emission strategy would change.
+
+Phase: 2c.
+
+---
+
+## 2026-05-02 — Session caches state in-memory
+
+**Decision:** A `Session` instance keeps its current state machine state as a private field, updated after every `applyEvent`. `Session.load()` replays history once to compute the initial state.
+
+**Why:** replaying history on every method call is correct but wasteful — sessions can have dozens of events. Caching is safe because no other process mutates the same session row (single-user localhost).
+
+**When this would change:** if we ever add cross-process coordination (e.g., a background worker that runs critique passes), the cache would need invalidation. For now the assumption holds.
+
+Phase: 2c.
+
+---
+
+## 2026-05-02 — IDs stamped after ingest
+
+**Decision:** When `Session.ingestResume` parses a Resume from markdown via the LLM, the orchestrator overwrites every `id` field on Bullets, Roles, Educations, and Projects with `crypto.randomUUID()` before persisting.
+
+**Why:** the LLM's generated IDs are not trustworthy — it can collide them, omit them, or generate duplicates across sections. Stamping fresh IDs guarantees uniqueness. The schema requires IDs to be strings; UUIDs are the obvious primitive.
+
+**Side effect:** the `id` fields the LLM produces are entirely ignored. The ingest-markdown template tells the model that "id fields can be any string — they will be replaced after parsing."
+
+Phase: 2c.
