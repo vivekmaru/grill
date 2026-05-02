@@ -1,8 +1,11 @@
+import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
 import type { ProviderAdapter } from '@/prompts/adapters/types'
 import type { Event } from '@/schema/events'
-import type { Resume } from '@/schema/resume'
+import { Resume } from '@/schema/resume'
 import type { TargetContext } from '@/schema/target'
+import { render } from '@/prompts/render'
+import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { FlagInstance } from '@/schema/flags'
 import { reduce } from '@/state/reducer'
 import { replay } from '@/state/replay'
@@ -42,18 +45,14 @@ export interface SessionSnapshot {
 export class Session {
   private state: State
   private readonly sessions: SessionRepo
-  // used by subsequent tasks (ingestResume, etc.)
-  // @ts-ignore TS6138 — populated now, consumed in later task methods
   private readonly resumes: ResumeRepo
   private readonly history: HistoryRepo
-  // @ts-ignore TS6138 — populated now, consumed in later task methods
   private readonly modelCalls: ModelCallsRepo
   private readonly budget: BudgetEnforcer
 
   private constructor(
     private readonly id: number,
     private readonly db: Database,
-    // @ts-ignore TS6138 — used in subsequent task methods
     private readonly adapter: ProviderAdapter,
     initialState: State,
     budget: BudgetEnforcer,
@@ -128,15 +127,85 @@ export class Session {
 
   // --- Methods stubbed for later tasks ---
 
-  ingestResume(_input: {
+  async ingestResume(input: {
     kind: 'markdown' | 'blank'
     text?: string
   }): Promise<Resume> {
-    throw new Error('not yet implemented')
+    let resume: Resume
+
+    if (input.kind === 'blank') {
+      // Empty resume scaffold
+      resume = stampIds(Resume.parse({
+        version: 1,
+        contact: { name: '', links: [] },
+        roles: [],
+        education: [],
+        projects: [],
+        skills: { categories: [] },
+        certifications: [],
+      }))
+      this.applyEvent({ type: 'START_BLANK' })
+    } else {
+      const markdown = input.text ?? ''
+      const template = await loadIngestTemplate()
+      const userPrompt = render(template, {
+        markdown,
+        output_schema: JSON.stringify(zodToJsonSchema(Resume)),
+      })
+
+      this.budget.recordCall()
+      const startMs = Date.now()
+      let result!: Resume
+      try {
+        const out = await this.adapter.callInSession({
+          sessionHandle: null,
+          tier: 'main',
+          systemPrompt:
+            'You convert markdown resumes into structured JSON. Return ONLY JSON.',
+          userPrompt,
+          schema: Resume,
+        })
+        result = out.result as Resume
+      } finally {
+        // Best-effort telemetry write (outside any transaction)
+        try {
+          this.modelCalls.record({
+            sessionId: this.getId(),
+            templateName: 'ingest-markdown',
+            provider: this.adapter.name,
+            tier: 'main',
+            tokensInEstimate: null,
+            tokensOutEstimate: null,
+            latencyMs: Date.now() - startMs,
+            validationFailures: 0,
+            verifierRejections: 0,
+          })
+          this.sessions.incrementCalls(this.getId())
+        } catch (e) {
+          console.warn(`[session] telemetry write failed: ${(e as Error).message}`)
+        }
+      }
+
+      resume = stampIds(result!)
+      this.applyEvent({ type: 'UPLOAD_RESUME', markdown })
+    }
+
+    // Persist the resume and link it to the session
+    const resumeId = this.resumes.create({ resume, versionName: 'ingest' })
+    this.sessions.setActiveResume(this.getId(), resumeId)
+
+    this.applyEvent({ type: 'CONFIRM_INGEST' })
+    return resume
   }
 
-  setTarget(_ctx: TargetContext): void {
-    throw new Error('not yet implemented')
+  setTarget(ctx: TargetContext): void {
+    this.db.transaction(() => {
+      this.sessions.setTargetContext(this.getId(), ctx)
+      this.sessions.setPersona(this.getId(), ctx.persona)
+    })()
+    this.applyEvent({ type: 'SET_TARGET', ctx })
+    this.applyEvent({ type: 'CONFIRM_PERSONA' })
+    this.applyEvent({ type: 'BEGIN_CRITIQUE' })
   }
 
   runCritique(): AsyncIterable<unknown> {
@@ -190,4 +259,38 @@ export class Session {
   getFlagsOnResume(): FlagInstance[] {
     throw new Error('not yet implemented')
   }
+}
+
+/**
+ * Walk a Resume tree and replace every `id` field with a fresh crypto UUID.
+ * Returns a deep copy with stamped IDs.
+ */
+function stampIds(resume: Resume): Resume {
+  const copy: Resume = JSON.parse(JSON.stringify(resume))
+  for (const role of copy.roles) {
+    role.id = crypto.randomUUID()
+    for (const bullet of role.bullets) {
+      bullet.id = crypto.randomUUID()
+    }
+  }
+  for (const edu of copy.education) {
+    edu.id = crypto.randomUUID()
+  }
+  for (const project of copy.projects) {
+    project.id = crypto.randomUUID()
+    for (const bullet of project.bullets) {
+      bullet.id = crypto.randomUUID()
+    }
+  }
+  return copy
+}
+
+const PROMPTS_DIR = join(import.meta.dir, '..', 'prompts')
+let cachedIngestTemplate: string | null = null
+async function loadIngestTemplate(): Promise<string> {
+  if (cachedIngestTemplate) return cachedIngestTemplate
+  cachedIngestTemplate = await Bun.file(
+    join(PROMPTS_DIR, 'templates/ingest-markdown.md'),
+  ).text()
+  return cachedIngestTemplate
 }
