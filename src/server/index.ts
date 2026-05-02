@@ -4,6 +4,9 @@ import type { AppDeps } from './deps'
 import { sessionsRoutes } from './routes/sessions'
 import { critiqueRoutes } from './routes/critique'
 import { flagsRoutes } from './routes/flags'
+import { editRoutes } from './routes/edit'
+import { endRoutes } from './routes/end'
+import { exportRoutes } from './routes/export'
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono()
@@ -15,6 +18,9 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/api/sessions', sessionsRoutes(deps))
   app.route('/api/sessions', critiqueRoutes(deps))
   app.route('/api/sessions', flagsRoutes(deps))
+  app.route('/api/sessions', editRoutes(deps))
+  app.route('/api/sessions', endRoutes(deps))
+  app.route('/api/sessions', exportRoutes(deps))
 
   return app
 }
