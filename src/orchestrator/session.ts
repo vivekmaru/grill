@@ -10,6 +10,8 @@ import type { FlagInstance } from '@/schema/flags'
 import { reduce } from '@/state/reducer'
 import { replay } from '@/state/replay'
 import type { State } from '@/state/states'
+import { CritiqueScanOutput } from './outputs'
+import { buildPersonaSystemPrompt } from './personaPrompt'
 import {
   createSessionRepo,
   type SessionRepo,
@@ -32,6 +34,26 @@ import {
   type BudgetEnforcer,
 } from './budget'
 import { MAX_MODEL_CALLS_PER_SESSION } from '@/config/critique'
+
+export type CritiqueEvent =
+  | { type: 'started'; sessionId: number; timestamp: number }
+  | {
+      type: 'flag'
+      bulletId: string
+      flag: FlagInstance
+    }
+  | {
+      type: 'pass-summary'
+      bulletsScanned: number
+      bulletsFlagged: number
+      topConcern: string
+    }
+  | {
+      type: 'done'
+      flagCount: number
+      durationMs: number
+    }
+  | { type: 'error'; message: string }
 
 export interface SessionSnapshot {
   id: number
@@ -208,8 +230,136 @@ export class Session {
     this.applyEvent({ type: 'BEGIN_CRITIQUE' })
   }
 
-  runCritique(): AsyncIterable<unknown> {
-    throw new Error('not yet implemented')
+  async *runCritique(): AsyncIterable<CritiqueEvent> {
+    if (this.state !== 'critique') {
+      throw new Error(
+        `runCritique requires state 'critique', got '${this.state}'`,
+      )
+    }
+
+    const startMs = Date.now()
+    yield { type: 'started', sessionId: this.id, timestamp: startMs }
+
+    const sessionRow = this.sessions.get(this.id)
+    if (!sessionRow?.activeResumeId) {
+      throw new Error('No active resume — call ingestResume first')
+    }
+    const stored = this.resumes.get(sessionRow.activeResumeId)
+    if (!stored) {
+      throw new Error(`Resume row missing: id=${sessionRow.activeResumeId}`)
+    }
+    const target = sessionRow.targetContext as TargetContext
+    if (!target) {
+      throw new Error('No target context — call setTarget first')
+    }
+
+    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {})
+    const template = await loadCritiqueTemplate()
+    const rubricFlags = await loadRubricFlags()
+
+    const dismissedBulletIds = stored.resume.roles.flatMap((r) =>
+      r.bullets
+        .filter((b) => b.flags.some((f) => f.dismissed))
+        .map((b) => b.id),
+    )
+
+    const userPrompt = render(template, {
+      persona: '', // already in systemPrompt
+      rubric_flags: rubricFlags,
+      target_context: JSON.stringify(target),
+      resume_json: JSON.stringify(stored.resume),
+      dismissed_bullet_ids: JSON.stringify(dismissedBulletIds),
+      output_schema: JSON.stringify(zodToJsonSchema(CritiqueScanOutput)),
+    })
+
+    this.budget.recordCall()
+    const callStart = Date.now()
+    let parsed
+    try {
+      const out = await this.adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: personaPrompt,
+        userPrompt,
+        schema: CritiqueScanOutput,
+      })
+      parsed = out.result
+    } catch (e) {
+      yield { type: 'error', message: (e as Error).message }
+      return
+    } finally {
+      try {
+        this.modelCalls.record({
+          sessionId: this.id,
+          templateName: 'critique-scan',
+          provider: this.adapter.name,
+          tier: 'main',
+          tokensInEstimate: null,
+          tokensOutEstimate: null,
+          latencyMs: Date.now() - callStart,
+          validationFailures: 0,
+          verifierRejections: 0,
+        })
+        this.sessions.incrementCalls(this.id)
+      } catch (e) {
+        console.warn(`[session] telemetry write failed: ${(e as Error).message}`)
+      }
+    }
+
+    // Persist the flags onto the resume in one transaction
+    const updatedResume: Resume = JSON.parse(JSON.stringify(stored.resume))
+    for (const f of parsed.flags) {
+      for (const role of updatedResume.roles) {
+        for (const bullet of role.bullets) {
+          if (bullet.id === f.bulletId) {
+            const flagInstance: FlagInstance = {
+              flag: f.flag,
+              severity: f.severity,
+              span: f.span,
+              why: f.why,
+              suggestedQuestion: f.suggestedQuestion,
+              dismissed: false,
+              dismissedAt: null,
+            }
+            bullet.flags.push(flagInstance)
+            bullet.status = 'flagged'
+          }
+        }
+      }
+    }
+    this.db.transaction(() => {
+      this.resumes.update(sessionRow.activeResumeId!, {
+        resume: updatedResume,
+        versionName: stored.versionName,
+      })
+    })()
+
+    // Synthesize per-flag events
+    for (const f of parsed.flags) {
+      const flagInstance: FlagInstance = {
+        flag: f.flag,
+        severity: f.severity,
+        span: f.span,
+        why: f.why,
+        suggestedQuestion: f.suggestedQuestion,
+        dismissed: false,
+        dismissedAt: null,
+      }
+      yield { type: 'flag', bulletId: f.bulletId, flag: flagInstance }
+    }
+
+    yield {
+      type: 'pass-summary',
+      bulletsScanned: parsed.passSummary.bulletsScanned,
+      bulletsFlagged: parsed.passSummary.bulletsFlagged,
+      topConcern: parsed.passSummary.topConcern,
+    }
+
+    yield {
+      type: 'done',
+      flagCount: parsed.flags.length,
+      durationMs: Date.now() - startMs,
+    }
   }
 
   acceptFlag(_args: {
@@ -240,7 +390,15 @@ export class Session {
   }
 
   currentResume(): Resume {
-    throw new Error('not yet implemented')
+    const row = this.sessions.get(this.id)
+    if (!row?.activeResumeId) {
+      throw new Error('No active resume')
+    }
+    const stored = this.resumes.get(row.activeResumeId)
+    if (!stored) {
+      throw new Error(`Resume row missing: id=${row.activeResumeId}`)
+    }
+    return stored.resume
   }
 
   editBullet(_args: { bulletId: string; newText: string }): void {
@@ -293,4 +451,22 @@ async function loadIngestTemplate(): Promise<string> {
     join(PROMPTS_DIR, 'templates/ingest-markdown.md'),
   ).text()
   return cachedIngestTemplate
+}
+
+let cachedCritiqueTemplate: string | null = null
+async function loadCritiqueTemplate(): Promise<string> {
+  if (cachedCritiqueTemplate) return cachedCritiqueTemplate
+  cachedCritiqueTemplate = await Bun.file(
+    join(PROMPTS_DIR, 'templates/critique-scan.md'),
+  ).text()
+  return cachedCritiqueTemplate
+}
+
+let cachedRubricFlags: string | null = null
+async function loadRubricFlags(): Promise<string> {
+  if (cachedRubricFlags) return cachedRubricFlags
+  cachedRubricFlags = await Bun.file(
+    join(PROMPTS_DIR, 'rubric/flags.md'),
+  ).text()
+  return cachedRubricFlags
 }
