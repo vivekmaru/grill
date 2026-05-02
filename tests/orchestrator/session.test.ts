@@ -242,3 +242,96 @@ describe('Session — runCritique', () => {
     expect(realBulletId.length).toBeGreaterThan(0)
   })
 })
+
+const sampleCritiqueResponse = (bulletId: string) => ({
+  flags: [
+    {
+      bulletId,
+      flag: 'vague',
+      severity: 2,
+      span: 'CI pipeline',
+      why: 'Too generic — what changed?',
+      suggestedQuestion: 'What problem did the pipeline solve?',
+    },
+  ],
+  passSummary: {
+    bulletsScanned: 1,
+    bulletsFlagged: 1,
+    topConcern: 'Single bullet flagged.',
+  },
+})
+
+describe('Session — flag mutations', () => {
+  let db: Database
+
+  beforeEach(() => {
+    db = createDb(':memory:')
+  })
+
+  async function setupWithFlag() {
+    // Only queue the ingest response up front; push the critique response
+    // lazily after we know the real bulletId stamped by ingestResume.
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+
+    const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
+    expect(bulletId.length).toBeGreaterThan(0)
+
+    // Now push the critique response with the real bulletId
+    stub.responses.push({ type: 'ok', value: sampleCritiqueResponse(bulletId) })
+
+    // Drain critique to populate the flag
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+    return { session, bulletId }
+  }
+
+  it('acceptFlag updates the bullet text and marks it refined', async () => {
+    const { session, bulletId } = await setupWithFlag()
+    const before = session.currentResume()
+    expect(before.roles[0]!.bullets[0]!.flags).toHaveLength(1)
+    expect(before.roles[0]!.bullets[0]!.status).toBe('flagged')
+
+    session.acceptFlag({
+      bulletId,
+      flagIndex: 0,
+      newText: 'Built a 6-stage CI pipeline that cut flake rate from 18% to 2%',
+    })
+
+    const after = session.currentResume()
+    expect(after.roles[0]!.bullets[0]!.text).toContain('CI pipeline')
+    expect(after.roles[0]!.bullets[0]!.status).toBe('refined')
+  })
+
+  it('skipFlag marks the bullet accepted without changing text', async () => {
+    const { session, bulletId } = await setupWithFlag()
+    const original = session.currentResume().roles[0]!.bullets[0]!.text
+
+    session.skipFlag({ bulletId, flagIndex: 0 })
+
+    const after = session.currentResume()
+    expect(after.roles[0]!.bullets[0]!.text).toBe(original)
+    expect(after.roles[0]!.bullets[0]!.status).toBe('accepted')
+  })
+
+  it('dismissFlag marks the flag dismissed with timestamp', async () => {
+    const { session, bulletId } = await setupWithFlag()
+    session.dismissFlag({ bulletId, flagIndex: 0 })
+
+    const after = session.currentResume()
+    const f = after.roles[0]!.bullets[0]!.flags[0]!
+    expect(f.dismissed).toBe(true)
+    expect(f.dismissedAt).toBeGreaterThan(0)
+  })
+
+  it('editBullet updates the bullet text via EDIT_RESUME event', async () => {
+    const { session, bulletId } = await setupWithFlag()
+    session.editBullet({ bulletId, newText: 'Manually rewritten' })
+
+    const after = session.currentResume()
+    expect(after.roles[0]!.bullets[0]!.text).toBe('Manually rewritten')
+  })
+})

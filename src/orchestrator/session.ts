@@ -362,24 +362,79 @@ export class Session {
     }
   }
 
-  acceptFlag(_args: {
+  acceptFlag(args: {
     bulletId: string
     flagIndex: number
     newText: string
   }): void {
-    throw new Error('not yet implemented')
+    this.db.transaction(() => {
+      this.mutateResume((r) => {
+        const located = this.findBullet(r, args.bulletId)
+        if (!located.ok) throw new Error(`Bullet not found: ${args.bulletId}`)
+        const collection =
+          located.role === 'role'
+            ? r.roles[located.index]!.bullets
+            : r.projects[located.index]!.bullets
+        const bullet = collection[located.bulletIndex]!
+        bullet.text = args.newText
+        bullet.status = 'refined'
+        return r
+      })
+      this.applyEvent({
+        type: 'ACCEPT_BULLET',
+        bulletId: args.bulletId,
+        newText: args.newText,
+      })
+    })()
   }
 
-  skipFlag(_args: { bulletId: string; flagIndex: number }): void {
-    throw new Error('not yet implemented')
+  skipFlag(args: { bulletId: string; flagIndex: number }): void {
+    this.db.transaction(() => {
+      this.mutateResume((r) => {
+        const located = this.findBullet(r, args.bulletId)
+        if (!located.ok) throw new Error(`Bullet not found: ${args.bulletId}`)
+        const collection =
+          located.role === 'role'
+            ? r.roles[located.index]!.bullets
+            : r.projects[located.index]!.bullets
+        const bullet = collection[located.bulletIndex]!
+        bullet.status = 'accepted'
+        return r
+      })
+      this.applyEvent({ type: 'SKIP_BULLET', bulletId: args.bulletId })
+    })()
   }
 
-  dismissFlag(_args: {
+  dismissFlag(args: {
     bulletId: string
     flagIndex: number
     reason?: string
   }): void {
-    throw new Error('not yet implemented')
+    this.db.transaction(() => {
+      this.mutateResume((r) => {
+        const located = this.findBullet(r, args.bulletId)
+        if (!located.ok) throw new Error(`Bullet not found: ${args.bulletId}`)
+        const collection =
+          located.role === 'role'
+            ? r.roles[located.index]!.bullets
+            : r.projects[located.index]!.bullets
+        const bullet = collection[located.bulletIndex]!
+        const flag = bullet.flags[args.flagIndex]
+        if (!flag) {
+          throw new Error(
+            `Flag index ${args.flagIndex} out of range on bullet ${args.bulletId}`,
+          )
+        }
+        flag.dismissed = true
+        flag.dismissedAt = Date.now()
+        return r
+      })
+      this.applyEvent({
+        type: 'DISMISS_FLAG',
+        bulletId: args.bulletId,
+        flagIndex: args.flagIndex,
+      })
+    })()
   }
 
   proposeRewrites(_args: {
@@ -401,12 +456,62 @@ export class Session {
     return stored.resume
   }
 
-  editBullet(_args: { bulletId: string; newText: string }): void {
-    throw new Error('not yet implemented')
+  editBullet(args: { bulletId: string; newText: string }): void {
+    this.db.transaction(() => {
+      this.mutateResume((r) => {
+        const located = this.findBullet(r, args.bulletId)
+        if (!located.ok) throw new Error(`Bullet not found: ${args.bulletId}`)
+        const collection =
+          located.role === 'role'
+            ? r.roles[located.index]!.bullets
+            : r.projects[located.index]!.bullets
+        const bullet = collection[located.bulletIndex]!
+        bullet.text = args.newText
+        return r
+      })
+    })()
   }
 
   endInterrogation(): void {
     throw new Error('not yet implemented')
+  }
+
+  /** Locate a bullet across roles and projects by id. */
+  private findBullet(
+    resume: Resume,
+    bulletId: string,
+  ):
+    | { ok: true; role: 'role' | 'project'; index: number; bulletIndex: number }
+    | { ok: false } {
+    for (let i = 0; i < resume.roles.length; i++) {
+      const role = resume.roles[i]!
+      for (let j = 0; j < role.bullets.length; j++) {
+        if (role.bullets[j]!.id === bulletId) {
+          return { ok: true, role: 'role', index: i, bulletIndex: j }
+        }
+      }
+    }
+    for (let i = 0; i < resume.projects.length; i++) {
+      const proj = resume.projects[i]!
+      for (let j = 0; j < proj.bullets.length; j++) {
+        if (proj.bullets[j]!.id === bulletId) {
+          return { ok: true, role: 'project', index: i, bulletIndex: j }
+        }
+      }
+    }
+    return { ok: false }
+  }
+
+  private mutateResume(mutator: (r: Resume) => Resume): void {
+    const row = this.sessions.get(this.id)
+    if (!row?.activeResumeId) throw new Error('No active resume')
+    const stored = this.resumes.get(row.activeResumeId)
+    if (!stored) throw new Error('Resume row missing')
+    const updated = mutator(JSON.parse(JSON.stringify(stored.resume)))
+    this.resumes.update(row.activeResumeId, {
+      resume: updated,
+      versionName: stored.versionName,
+    })
   }
 
   getId(): number {
