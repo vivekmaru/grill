@@ -10,7 +10,8 @@ import type { FlagInstance } from '@/schema/flags'
 import { reduce } from '@/state/reducer'
 import { replay } from '@/state/replay'
 import type { State } from '@/state/states'
-import { CritiqueScanOutput } from './outputs'
+import { CritiqueScanOutput, RewriteOutput } from './outputs'
+import type { FlagType } from '@/schema/flags'
 import { buildPersonaSystemPrompt } from './personaPrompt'
 import {
   createSessionRepo,
@@ -34,6 +35,23 @@ import {
   type BudgetEnforcer,
 } from './budget'
 import { MAX_MODEL_CALLS_PER_SESSION } from '@/config/critique'
+
+export class EvidencedFlagNotSupportedError extends Error {
+  constructor(public readonly flag: FlagType) {
+    super(
+      `Flag '${flag}' requires evidenced rewrite (sub-plan 3). ` +
+        'Use editBullet for v2 manual editing.',
+    )
+    this.name = 'EvidencedFlagNotSupportedError'
+  }
+}
+
+const WORDSMITHING_FLAGS: ReadonlySet<FlagType> = new Set<FlagType>([
+  'vague',
+  'passive',
+  'length',
+  'jargon',
+])
 
 export type CritiqueEvent =
   | { type: 'started'; sessionId: number; timestamp: number }
@@ -437,11 +455,77 @@ export class Session {
     })()
   }
 
-  proposeRewrites(_args: {
+  async proposeRewrites(args: {
     bulletId: string
     flagIndex: number
-  }): Promise<unknown> {
-    throw new Error('not yet implemented')
+  }): Promise<RewriteOutput> {
+    const row = this.sessions.get(this.id)
+    if (!row?.activeResumeId) throw new Error('No active resume')
+    const stored = this.resumes.get(row.activeResumeId)
+    if (!stored) throw new Error('Resume row missing')
+    const target = row.targetContext as TargetContext
+    if (!target) throw new Error('No target context')
+
+    const located = this.findBullet(stored.resume, args.bulletId)
+    if (!located.ok) throw new Error(`Bullet not found: ${args.bulletId}`)
+    const collection =
+      located.role === 'role'
+        ? stored.resume.roles[located.index]!.bullets
+        : stored.resume.projects[located.index]!.bullets
+    const bullet = collection[located.bulletIndex]!
+    const flag = bullet.flags[args.flagIndex]
+    if (!flag) {
+      throw new Error(
+        `Flag index ${args.flagIndex} out of range on bullet ${args.bulletId}`,
+      )
+    }
+
+    if (!WORDSMITHING_FLAGS.has(flag.flag)) {
+      throw new EvidencedFlagNotSupportedError(flag.flag)
+    }
+
+    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {})
+    const template = await loadRewriteWordsmithTemplate()
+    const userPrompt = render(template, {
+      persona: '',
+      original_bullet: bullet.text,
+      flag_type: flag.flag,
+      flag_reason: flag.why,
+      user_clarification: '',
+      output_schema: JSON.stringify(zodToJsonSchema(RewriteOutput)),
+    })
+
+    this.budget.recordCall()
+    const callStart = Date.now()
+    let result: RewriteOutput
+    try {
+      const out = await this.adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: personaPrompt,
+        userPrompt,
+        schema: RewriteOutput,
+      })
+      result = out.result
+    } finally {
+      try {
+        this.modelCalls.record({
+          sessionId: this.id,
+          templateName: 'rewrite-wordsmith',
+          provider: this.adapter.name,
+          tier: 'main',
+          tokensInEstimate: null,
+          tokensOutEstimate: null,
+          latencyMs: Date.now() - callStart,
+          validationFailures: 0,
+          verifierRejections: 0,
+        })
+        this.sessions.incrementCalls(this.id)
+      } catch (e) {
+        console.warn(`[session] telemetry write failed: ${(e as Error).message}`)
+      }
+    }
+    return result!
   }
 
   currentResume(): Resume {
@@ -575,4 +659,13 @@ async function loadRubricFlags(): Promise<string> {
     join(PROMPTS_DIR, 'rubric/flags.md'),
   ).text()
   return cachedRubricFlags
+}
+
+let cachedRewriteTemplate: string | null = null
+async function loadRewriteWordsmithTemplate(): Promise<string> {
+  if (cachedRewriteTemplate) return cachedRewriteTemplate
+  cachedRewriteTemplate = await Bun.file(
+    join(PROMPTS_DIR, 'templates/rewrite-wordsmith.md'),
+  ).text()
+  return cachedRewriteTemplate
 }

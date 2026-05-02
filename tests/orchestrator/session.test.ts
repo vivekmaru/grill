@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
 import type { Database } from 'bun:sqlite'
-import { Session } from '@/orchestrator/session'
+import { Session, EvidencedFlagNotSupportedError } from '@/orchestrator/session'
 import { createDb } from '@/server/db/client'
 import { createStubAdapter } from './_helpers/stubAdapter'
 import type { TargetContext } from '@/schema/target'
@@ -333,5 +333,95 @@ describe('Session — flag mutations', () => {
 
     const after = session.currentResume()
     expect(after.roles[0]!.bullets[0]!.text).toBe('Manually rewritten')
+  })
+})
+
+describe('Session — proposeRewrites', () => {
+  let db: Database
+
+  beforeEach(() => {
+    db = createDb(':memory:')
+  })
+
+  /**
+   * Sets up a session with a vague flag on the first bullet.
+   * Returns the session, bulletId, and the stub so tests can push more responses.
+   */
+  async function setupWithFlagAndStub() {
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+
+    const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
+    stub.responses.push({ type: 'ok', value: sampleCritiqueResponse(bulletId) })
+
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+    return { session, bulletId, stub }
+  }
+
+  it('returns 2 candidates for a vague flag', async () => {
+    const { session, bulletId, stub } = await setupWithFlagAndStub()
+
+    // Push the rewrite response
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        candidates: [
+          { text: 'Rewrite A', evidenceMap: [{ span: 'CI pipeline', source: 'original' }] },
+          { text: 'Rewrite B', evidenceMap: [{ span: 'CI pipeline', source: 'original' }] },
+        ],
+      },
+    })
+
+    const result = await session.proposeRewrites({ bulletId, flagIndex: 0 })
+    expect(result.candidates).toHaveLength(2)
+    expect(result.candidates[0]!.text).toBe('Rewrite A')
+    expect(result.candidates[1]!.text).toBe('Rewrite B')
+  })
+
+  it('throws EvidencedFlagNotSupportedError for an evidence flag', async () => {
+    // Build a session with an 'unverified' flag (evidence type)
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+
+    const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
+
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        flags: [
+          {
+            bulletId,
+            flag: 'unverified',
+            severity: 3,
+            span: 'CI pipeline',
+            why: 'No supporting metric.',
+            suggestedQuestion: 'What is the throughput improvement?',
+          },
+        ],
+        passSummary: { bulletsScanned: 1, bulletsFlagged: 1, topConcern: '' },
+      },
+    })
+
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+
+    await expect(
+      session.proposeRewrites({ bulletId, flagIndex: 0 }),
+    ).rejects.toThrow(EvidencedFlagNotSupportedError)
+  })
+
+  it('throws plain Error when flagIndex is out of range', async () => {
+    const { session, bulletId } = await setupWithFlagAndStub()
+
+    await expect(
+      session.proposeRewrites({ bulletId, flagIndex: 99 }),
+    ).rejects.toThrow(/out of range/)
   })
 })
