@@ -79,4 +79,27 @@ describe('templates', () => {
       expect(tpl).toContain('exactly 2 candidates')
     })
   })
+
+  describe('persona-system.md', () => {
+    const tpl = readTemplate('persona-system.md')
+
+    it('contains all expected slots', () => {
+      for (const slot of ['{{archetype}}', '{{tone}}', '{{rubric_core}}']) {
+        expect(tpl).toContain(slot)
+      }
+    })
+
+    it('contains the conditional jdOverlay block', () => {
+      expect(tpl).toContain('{{#if jdOverlay}}')
+      expect(tpl).toContain('{{jdOverlay}}')
+      expect(tpl).toContain('{{/if}}')
+    })
+
+    it('contains the four hard rules', () => {
+      expect(tpl).toContain('Never invent metrics')
+      expect(tpl).toContain('you must ask, not assume')
+      expect(tpl).toContain('Stay in role')
+      expect(tpl).toContain('return ONLY the requested JSON')
+    })
+  })
 })
