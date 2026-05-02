@@ -24,4 +24,8 @@ describe('State', () => {
     expect(allowedEventsFor('critique')).toContain('END_INTERROGATION')
     expect(allowedEventsFor('finalReview')).toContain('END_INTERROGATION')
   })
+
+  it('allows BEGIN_CRITIQUE from gather', () => {
+    expect(allowedEventsFor('gather')).toContain('BEGIN_CRITIQUE')
+  })
 })

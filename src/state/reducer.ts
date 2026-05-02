@@ -30,9 +30,8 @@ export function reduce(state: State, event: Event): State {
       }
       return 'persona'
     case 'gather':
-      // gather→critique happens via the orchestrator emitting an internal
-      // event after gather is complete (lands in sub-plan 3). For now, the
-      // only user-facing exit from gather is END_INTERROGATION (handled above).
+      if (event.type === 'BEGIN_CRITIQUE') return 'critique'
+      // The only other exit from gather is END_INTERROGATION (handled above).
       return 'gather'
     case 'critique':
       if (event.type === 'PROCEED_TO_GENERATE') return 'finalReview'

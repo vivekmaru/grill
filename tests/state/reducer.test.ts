@@ -58,4 +58,14 @@ describe('reduce', () => {
   it('moves edit → export on EXPORT', () => {
     expect(reduce('edit', { type: 'EXPORT', format: 'pdf' })).toBe('export')
   })
+
+  it('moves gather → critique on BEGIN_CRITIQUE', () => {
+    expect(reduce('gather', { type: 'BEGIN_CRITIQUE' })).toBe('critique')
+  })
+
+  it('throws if BEGIN_CRITIQUE is fired outside gather', () => {
+    expect(() =>
+      reduce('ingest', { type: 'BEGIN_CRITIQUE' }),
+    ).toThrow(/not allowed/)
+  })
 })
