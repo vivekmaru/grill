@@ -4,19 +4,33 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run --hot src/server/index.ts",
+    "dev": "bun run --hot src/server/dev.ts",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "type-check": "tsc --noEmit",
     "build": "echo 'see sub-plan 7' && exit 1"
   },
   "dependencies": {
+    "@hookform/resolvers": "^3",
+    "@tanstack/react-query": "^5",
+    "class-variance-authority": "^0.7",
+    "clsx": "^2",
     "hono": "^4.6.0",
+    "lucide-react": "^0.460",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-hook-form": "^7",
+    "tailwind-merge": "^2",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "bun-plugin-tailwind": "^0.0.15",
+    "happy-dom": "^15",
+    "tailwindcss": "^4",
     "typescript": "^5.5.0"
   }
 }
