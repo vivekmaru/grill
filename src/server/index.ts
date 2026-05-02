@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import packageJson from '../../package.json' with { type: 'json' }
+import type { AppDeps } from './deps'
 
-export function createApp(): Hono {
+export function createApp(_deps: AppDeps): Hono {
   const app = new Hono()
 
   app.get('/healthz', (c) =>
@@ -11,14 +12,10 @@ export function createApp(): Hono {
   return app
 }
 
-// Bun entry point — only runs when this file is executed directly.
+export type { AppDeps } from './deps'
+
 if (import.meta.main) {
-  const app = createApp()
-  const port = Number(Bun.env.PORT ?? 4321)
-  console.log(`resume-builder listening on http://127.0.0.1:${port}`)
-  Bun.serve({
-    port,
-    hostname: '127.0.0.1',
-    fetch: app.fetch,
-  })
+  throw new Error(
+    'Direct execution disabled — production composition arrives in phase 2h.',
+  )
 }
