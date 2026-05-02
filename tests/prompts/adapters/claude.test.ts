@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { createClaudeAdapter, type ClaudeAdapterConfig } from '@/prompts/adapters/claude'
+import { createClaudeAdapter, type ClaudeAdapterConfig, type SpawnFn } from '@/prompts/adapters/claude'
 import { AdapterError } from '@/prompts/adapters/types'
 import { z } from 'zod'
 import { createMockSpawn } from './_helpers/mockSpawn'
@@ -430,6 +430,50 @@ describe('createClaudeAdapter — schema retry', () => {
     ).rejects.toMatchObject({
       name: 'AdapterError',
       cause: 'schema-failed',
+    })
+  })
+})
+
+describe('createClaudeAdapter — error paths', () => {
+  it('throws AdapterError(spawn-failed) when spawn itself throws', async () => {
+    const throwingSpawn: SpawnFn = () => {
+      throw new Error('ENOENT: no such file or directory')
+    }
+    const adapter = createClaudeAdapter(baseConfig, throwingSpawn)
+    await expect(
+      adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: 's',
+        userPrompt: 'u',
+        schema: Sample,
+      }),
+    ).rejects.toMatchObject({
+      name: 'AdapterError',
+      cause: 'spawn-failed',
+    })
+  })
+
+  it('throws AdapterError(cli-error) when subprocess exits non-zero', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 1,
+        stdoutChunks: [],
+        stderrChunks: ['fatal: invalid model\n'],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    await expect(
+      adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: 's',
+        userPrompt: 'u',
+        schema: Sample,
+      }),
+    ).rejects.toMatchObject({
+      name: 'AdapterError',
+      cause: 'cli-error',
     })
   })
 })

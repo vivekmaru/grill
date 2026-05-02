@@ -146,11 +146,19 @@ export function createClaudeAdapter(
         resumeId: SessionHandle,
       ): Promise<CallResult> => {
         const args = buildArgs(config, tier, systemPrompt, jsonSchema, resumeId)
-        const proc = spawnFn([config.bin, ...args], {
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-        })
+        let proc: SubprocessLike
+        try {
+          proc = spawnFn([config.bin, ...args], {
+            stdin: 'pipe',
+            stdout: 'pipe',
+            stderr: 'pipe',
+          })
+        } catch (e) {
+          throw new AdapterError(
+            `failed to spawn ${config.bin}: ${(e as Error).message}`,
+            'spawn-failed',
+          )
+        }
         proc.stdin.write(prompt)
         proc.stdin.end()
 
