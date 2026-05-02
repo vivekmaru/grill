@@ -343,3 +343,93 @@ describe('createClaudeAdapter — session resume', () => {
     expect(out.sessionHandle).toBe('s-resumed')
   })
 })
+
+describe('createClaudeAdapter — schema retry', () => {
+  it('retries with corrective prompt and uses retry sessionId on success', async () => {
+    const mock = createMockSpawn([
+      // First call: schema fails — `value` is a string instead of number
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's-1' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: true, value: 'forty-two' },
+          }) + '\n',
+        ],
+      },
+      // Retry call: succeeds
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's-2' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: true, value: 42 },
+          }) + '\n',
+        ],
+      },
+    ])
+
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    const out = await adapter.callInSession({
+      sessionHandle: null,
+      tier: 'main',
+      systemPrompt: 's',
+      userPrompt: 'do the thing',
+      schema: Sample,
+    })
+
+    expect(out.result).toEqual({ ok: true, value: 42 })
+    expect(out.sessionHandle).toBe('s-2')
+
+    expect(mock.calls).toHaveLength(2)
+    // Retry uses the first call's sessionId via --resume
+    const retryCmd = mock.calls[1]!.cmd
+    expect(retryCmd).toContain('--resume')
+    expect(retryCmd[retryCmd.indexOf('--resume') + 1]).toBe('s-1')
+    // Retry stdin contains the corrective prompt
+    expect(mock.calls[1]!.stdinBuffer).toContain('do the thing')
+    expect(mock.calls[1]!.stdinBuffer).toContain('did not match the required schema')
+  })
+
+  it('throws AdapterError(schema-failed) when retry also fails', async () => {
+    const mock = createMockSpawn([
+      // First call: schema fails
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's-1' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: 'still wrong' },
+          }) + '\n',
+        ],
+      },
+      // Retry call: ALSO fails
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's-2' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            structured_output: { ok: 'still wrong on retry' },
+          }) + '\n',
+        ],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    await expect(
+      adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: 's',
+        userPrompt: 'u',
+        schema: Sample,
+      }),
+    ).rejects.toMatchObject({
+      name: 'AdapterError',
+      cause: 'schema-failed',
+    })
+  })
+})
