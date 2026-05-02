@@ -7,3 +7,4 @@ export const DEFAULT_SEVERITY_FLOOR = 2 as 1 | 2 | 3
 export const MAX_REWRITE_RETRIES = 1
 export const MAX_REWRITE_CANDIDATES = 2
 export const JD_OVERLAY_MAX_STANDARDS = 3
+export const MAX_MODEL_CALLS_PER_SESSION = 50
