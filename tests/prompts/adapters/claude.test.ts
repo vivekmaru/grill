@@ -173,3 +173,54 @@ describe('createClaudeAdapter — happy path', () => {
     expect(parsed.properties.value).toBeDefined()
   })
 })
+
+describe('createClaudeAdapter — JSON-island fallback', () => {
+  it('extracts JSON from result text when structured_output is absent', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            // No structured_output. Result text contains prose-wrapped JSON.
+            result: 'Here you go: {"ok":true,"value":7} hope that helps.',
+          }) + '\n',
+        ],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    const out = await adapter.callInSession({
+      sessionHandle: null,
+      tier: 'main',
+      systemPrompt: 's',
+      userPrompt: 'u',
+      schema: Sample,
+    })
+    expect(out.result).toEqual({ ok: true, value: 7 })
+  })
+
+  it('extracts JSON from a markdown code fence in result text', async () => {
+    const mock = createMockSpawn([
+      {
+        exitCode: 0,
+        stdoutChunks: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 's' }) + '\n',
+          JSON.stringify({
+            type: 'result',
+            result: '```json\n{"ok":false,"value":3}\n```',
+          }) + '\n',
+        ],
+      },
+    ])
+    const adapter = createClaudeAdapter(baseConfig, mock.spawn)
+    const out = await adapter.callInSession({
+      sessionHandle: null,
+      tier: 'main',
+      systemPrompt: 's',
+      userPrompt: 'u',
+      schema: Sample,
+    })
+    expect(out.result).toEqual({ ok: false, value: 3 })
+  })
+})
