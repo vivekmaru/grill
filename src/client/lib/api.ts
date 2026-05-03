@@ -167,3 +167,52 @@ export async function endSession(sessionId: number): Promise<void> {
     body: '{}',
   })
 }
+
+export type GatherQuestion =
+  | { kind: 'broad' | 'followup'; turnId: number; question: string }
+  | { kind: 'done'; reason: string }
+
+export async function askGatherQuestion(args: {
+  sessionId: number
+  roleId: string
+}): Promise<GatherQuestion> {
+  return requestJson<GatherQuestion>(
+    `/api/sessions/${args.sessionId}/gather/role/${encodeURIComponent(args.roleId)}/ask`,
+    { method: 'POST' },
+  )
+}
+
+export async function recordGatherAnswer(args: {
+  sessionId: number
+  roleId: string
+  turnId: number
+  answer: string
+}): Promise<void> {
+  await requestJson<{ ok: true }>(
+    `/api/sessions/${args.sessionId}/gather/role/${encodeURIComponent(args.roleId)}/answer`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ turnId: args.turnId, answer: args.answer }),
+    },
+  )
+}
+
+export async function skipGatherRole(args: {
+  sessionId: number
+  roleId: string
+}): Promise<void> {
+  await requestJson<{ ok: true }>(
+    `/api/sessions/${args.sessionId}/gather/role/${encodeURIComponent(args.roleId)}/skip`,
+    { method: 'POST' },
+  )
+}
+
+export async function endGather(args: {
+  sessionId: number
+}): Promise<{ snapshot: SessionSnapshot }> {
+  return requestJson<{ snapshot: SessionSnapshot }>(
+    `/api/sessions/${args.sessionId}/gather/end`,
+    { method: 'POST' },
+  )
+}
