@@ -140,6 +140,51 @@ describe('Session — setup phase', () => {
     expect(session.snapshot().state).toBe('target')
   })
 
+  it('ingestResume with kind=pdf extracts text and routes through the markdown ingest', async () => {
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    // Minimal valid PDF rendering "Hello PDF World" — same payload verified
+    // out-of-band that unpdf can extract.
+    const minimalPdf = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R /MediaBox [0 0 612 792] >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 44 >>
+stream
+BT /F1 12 Tf 50 750 Td (Hello PDF World) Tj ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f
+0000000009 00000 n
+0000000058 00000 n
+0000000115 00000 n
+0000000216 00000 n
+0000000284 00000 n
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+386
+%%EOF`
+    const data = btoa(minimalPdf)
+    await session.ingestResume({ kind: 'pdf', data })
+
+    expect(stub.calls).toHaveLength(1)
+    expect(stub.calls[0]!.userPrompt).toContain('Hello PDF World')
+    expect(session.snapshot().state).toBe('target')
+  })
+
   it('setTarget with gather_enabled=true leaves session in gather state', async () => {
     const stub = createStubAdapter([
       { type: 'ok', value: sampleResumeJson },

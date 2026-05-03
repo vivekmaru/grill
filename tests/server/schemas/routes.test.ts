@@ -45,9 +45,17 @@ describe('CreateSessionBody', () => {
     expect(out.success).toBe(true)
   })
 
+  it('accepts a pdf ingest with base64 data', () => {
+    const out = CreateSessionBody.safeParse({
+      resume: { kind: 'pdf', data: 'JVBERi0xLjQKJ...==' },
+      target: validTarget,
+    })
+    expect(out.success).toBe(true)
+  })
+
   it('rejects unknown resume kind', () => {
     const out = CreateSessionBody.safeParse({
-      resume: { kind: 'pdf', text: 'x' },
+      resume: { kind: 'docx', text: 'x' },
       target: validTarget,
     })
     expect(out.success).toBe(false)

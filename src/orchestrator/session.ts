@@ -226,11 +226,28 @@ export class Session {
 
   // --- Methods stubbed for later tasks ---
 
-  async ingestResume(input: {
-    kind: 'markdown' | 'blank'
-    text?: string
-  }): Promise<Resume> {
+  async ingestResume(input:
+    | { kind: 'markdown'; text: string }
+    | { kind: 'blank' }
+    | { kind: 'pdf'; data: string }
+  ): Promise<Resume> {
     let resume: Resume
+
+    if (input.kind === 'pdf') {
+      // Extract text via unpdf, then re-enter the markdown branch.
+      const { extractText, getDocumentProxy } = await import('unpdf')
+      const buf = Uint8Array.from(atob(input.data), (c) => c.charCodeAt(0))
+      const pdf = await getDocumentProxy(buf)
+      const { text } = await extractText(pdf, { mergePages: true })
+      const merged = Array.isArray(text) ? text.join('\n\n') : text
+      if (!merged.trim()) {
+        throw new Error(
+          'PDF parsing returned empty text — the file may be a scanned image. ' +
+            'Paste the resume as markdown instead.',
+        )
+      }
+      input = { kind: 'markdown', text: merged }
+    }
 
     if (input.kind === 'blank') {
       // Empty resume scaffold
@@ -245,7 +262,7 @@ export class Session {
       }))
       this.applyEvent({ type: 'START_BLANK' })
     } else {
-      const markdown = input.text ?? ''
+      const markdown = input.text
       const template = await loadIngestTemplate()
       const userPrompt = render(template, {
         markdown,

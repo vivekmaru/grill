@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useMutation } from '@tanstack/react-query'
 import { CreateSessionBody } from '@/server/schemas/routes'
@@ -67,10 +68,25 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
     },
   })
 
+  const [pdfData, setPdfData] = useState<string | null>(null)
+  const [pdfName, setPdfName] = useState<string | null>(null)
+
+  async function onPdfPicked(file: File) {
+    const buf = await file.arrayBuffer()
+    let binary = ''
+    const bytes = new Uint8Array(buf)
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]!)
+    setPdfData(btoa(binary))
+    setPdfName(file.name)
+  }
+
   const mutation = useMutation<CreateSessionResponse, ApiError, FormValues>({
     mutationFn: async (values) => {
+      const resume = pdfData
+        ? ({ kind: 'pdf' as const, data: pdfData })
+        : ({ kind: 'markdown' as const, text: values.resumeText })
       const body = {
-        resume: { kind: 'markdown' as const, text: values.resumeText },
+        resume,
         target: {
           targetRole: values.targetRole,
           targetSeniority: values.targetSeniority,
@@ -100,12 +116,45 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
             onSubmit={form.handleSubmit((v) => mutation.mutate(v))}
           >
             <div className="space-y-2">
-              <Label htmlFor="resumeText">Resume (markdown)</Label>
+              <Label htmlFor="resumeText">Resume (markdown or PDF upload)</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  data-testid="resume-pdf"
+                  onChange={(e) => {
+                    const f = e.currentTarget.files?.[0]
+                    if (f) void onPdfPicked(f)
+                  }}
+                  className="text-sm"
+                />
+                {pdfName ? (
+                  <span className="text-sm text-muted-foreground" data-testid="pdf-name">
+                    {pdfName}
+                  </span>
+                ) : null}
+                {pdfData ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setPdfData(null)
+                      setPdfName(null)
+                    }}
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
               <Textarea
                 id="resumeText"
                 rows={10}
                 placeholder="# Jane Doe&#10;Senior Engineer..."
-                {...form.register('resumeText', { required: true, minLength: 1 })}
+                disabled={!!pdfData}
+                {...form.register('resumeText', {
+                  validate: (v) => !!pdfData || (v?.length ?? 0) > 0,
+                })}
               />
             </div>
 

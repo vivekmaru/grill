@@ -5,6 +5,7 @@ export const CreateSessionBody = z.object({
   resume: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('markdown'), text: z.string().min(1) }),
     z.object({ kind: z.literal('blank') }),
+    z.object({ kind: z.literal('pdf'), data: z.string().min(1) }), // base64
   ]),
   target: TargetContext,
   gather: z.boolean().optional(),
