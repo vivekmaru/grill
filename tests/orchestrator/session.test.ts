@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
 import type { Database } from 'bun:sqlite'
-import { Session, EvidencedFlagNotSupportedError } from '@/orchestrator/session'
+import { Session } from '@/orchestrator/session'
 import { createDb } from '@/server/db/client'
 import { createStubAdapter } from './_helpers/stubAdapter'
 import type { TargetContext } from '@/schema/target'
@@ -496,8 +496,7 @@ describe('Session — proposeRewrites', () => {
     expect(result.candidates[1]!.text).toBe('Rewrite B')
   })
 
-  it('throws EvidencedFlagNotSupportedError for an evidence flag', async () => {
-    // Build a session with an 'unverified' flag (evidence type)
+  it('uses rewrite-evidenced for evidence flags and accepts numbers grounded in the original', async () => {
     const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
@@ -527,9 +526,79 @@ describe('Session — proposeRewrites', () => {
       /* drain */
     }
 
+    // Rewrite that introduces no new numeric tokens (verifier-clean)
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        candidates: [
+          {
+            text: 'Hardened the CI pipeline so deploys ship without manual fixes.',
+            evidenceMap: [{ span: 'CI pipeline', source: 'original' }],
+          },
+          {
+            text: 'Rebuilt the CI pipeline to reduce deploy errors.',
+            evidenceMap: [{ span: 'CI pipeline', source: 'original' }],
+          },
+        ],
+      },
+    })
+
+    const out = await session.proposeRewrites({ bulletId, flagIndex: 0 })
+    expect(out.candidates).toHaveLength(2)
+  })
+
+  it('rejects a rewrite that invents numbers not in original or evidence', async () => {
+    const { VerifierFailedError } = await import('@/orchestrator/session')
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
+    session.setTarget(sampleTarget)
+
+    const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
+
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        flags: [
+          {
+            bulletId,
+            flag: 'unverified',
+            severity: 3,
+            span: 'CI pipeline',
+            why: 'No supporting metric.',
+            suggestedQuestion: 'What is the throughput improvement?',
+          },
+        ],
+        passSummary: { bulletsScanned: 1, bulletsFlagged: 1, topConcern: '' },
+      },
+    })
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+
+    // Both first and retry candidates invent "40%" — verifier should reject both
+    const inventing = {
+      type: 'ok' as const,
+      value: {
+        candidates: [
+          {
+            text: 'Cut CI pipeline runtime by 40%.',
+            evidenceMap: [{ span: 'CI pipeline', source: 'original' }],
+          },
+          {
+            text: 'Reduced CI failures by 40%.',
+            evidenceMap: [{ span: 'CI pipeline', source: 'original' }],
+          },
+        ],
+      },
+    }
+    stub.responses.push(inventing)
+    stub.responses.push(inventing)
+
     await expect(
       session.proposeRewrites({ bulletId, flagIndex: 0 }),
-    ).rejects.toThrow(EvidencedFlagNotSupportedError)
+    ).rejects.toThrow(VerifierFailedError)
   })
 
   it('throws plain Error when flagIndex is out of range', async () => {

@@ -322,7 +322,7 @@ describe('<SessionScreen />', () => {
     expect(document.body.textContent).toContain('generate')
   })
 
-  it('does not call rewrite for evidence-only flags', async () => {
+  it('renders the rewrite button for evidence flags (rewrite-evidenced path is enabled)', async () => {
     const calls: string[] = []
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -368,8 +368,7 @@ describe('<SessionScreen />', () => {
     await mount()
     await flush()
 
-    expect(document.body.textContent).toContain('Manual edit only')
-    expect(document.querySelector('button[data-testid="rewrite-b1-0"]')).toBeNull()
-    expect(calls.some((c) => c.endsWith('/rewrite'))).toBe(false)
+    expect(document.body.textContent).not.toContain('Manual edit only')
+    expect(document.querySelector('button[data-testid="rewrite-b1-0"]')).not.toBeNull()
   })
 })

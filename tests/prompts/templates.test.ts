@@ -80,6 +80,37 @@ describe('templates', () => {
     })
   })
 
+  describe('rewrite-evidenced.md', () => {
+    const tpl = readTemplate('rewrite-evidenced.md')
+
+    it('contains all expected slots', () => {
+      for (const slot of [
+        '{{persona}}',
+        '{{original_bullet}}',
+        '{{flag_type}}',
+        '{{flag_reason}}',
+        '{{evidence}}',
+        '{{output_schema}}',
+      ]) {
+        expect(tpl).toContain(slot)
+      }
+    })
+
+    it('lists the four evidence flag types', () => {
+      for (const flag of ['unverified', 'no-impact', 'inflated', 'stale']) {
+        expect(tpl).toContain(flag)
+      }
+    })
+
+    it('forbids un-sourced numeric tokens', () => {
+      expect(tpl).toContain('un-sourced numeric')
+    })
+
+    it('asks for exactly 2 candidates', () => {
+      expect(tpl).toContain('exactly 2 candidates')
+    })
+  })
+
   describe('ingest-markdown.md', () => {
     const tpl = readTemplate('ingest-markdown.md')
 

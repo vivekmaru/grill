@@ -30,7 +30,16 @@ interface SessionScreenProps {
 
 type LiveFlag = { bulletId: string; flag: FlagInstance }
 
-const WORDSMITHING_FLAGS = new Set(['vague', 'passive', 'length', 'jargon'])
+const REWRITABLE_FLAGS = new Set([
+  'vague',
+  'passive',
+  'length',
+  'jargon',
+  'unverified',
+  'no-impact',
+  'inflated',
+  'stale',
+])
 
 function flagActionKey(bulletId: string, flagIndex: number): string {
   return `${bulletId}:${flagIndex}`
@@ -108,7 +117,7 @@ function FlagActions({
   onProcessed: () => void
 }) {
   const [rewriteText, setRewriteText] = useState<string | null>(null)
-  const supportsRewrite = WORDSMITHING_FLAGS.has(flag.flag)
+  const supportsRewrite = REWRITABLE_FLAGS.has(flag.flag)
   const accept = useMutation({
     mutationFn: () =>
       acceptFlag({

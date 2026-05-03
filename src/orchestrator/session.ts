@@ -36,6 +36,7 @@ import {
   type BudgetEnforcer,
 } from './budget'
 import { GatherTurnsRepo } from '@/server/db/repositories/gatherTurns'
+import { extractNumbers } from './verifier/numbers'
 import { MAX_MODEL_CALLS_PER_SESSION } from '@/config/critique'
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,26 @@ const WORDSMITHING_FLAGS: ReadonlySet<FlagType> = new Set<FlagType>([
   'length',
   'jargon',
 ])
+
+const EVIDENCE_FLAGS: ReadonlySet<FlagType> = new Set<FlagType>([
+  'unverified',
+  'no-impact',
+  'inflated',
+  'stale',
+])
+
+export class VerifierFailedError extends Error {
+  constructor(
+    public readonly invented: ReadonlyArray<string>,
+    public readonly flag: FlagType,
+  ) {
+    super(
+      `Rewrite verifier rejected candidate: introduces numbers not in evidence (${invented.join(', ')}). ` +
+        `Flag '${flag}' needs more concrete answers in the gather phase.`,
+    )
+    this.name = 'VerifierFailedError'
+  }
+}
 
 export type CritiqueEvent =
   | { type: 'started'; sessionId: number; timestamp: number }
@@ -657,52 +678,134 @@ export class Session {
       )
     }
 
-    if (!WORDSMITHING_FLAGS.has(flag.flag)) {
-      throw new EvidencedFlagNotSupportedError(flag.flag)
+    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {})
+
+    if (WORDSMITHING_FLAGS.has(flag.flag)) {
+      const template = await loadRewriteWordsmithTemplate()
+      const userPrompt = render(template, {
+        persona: '',
+        original_bullet: bullet.text,
+        flag_type: flag.flag,
+        flag_reason: flag.why,
+        user_clarification: '',
+        output_schema: JSON.stringify(zodToJsonSchema(RewriteOutput)),
+      })
+      return this.callRewrite({
+        templateName: 'rewrite-wordsmith',
+        personaPrompt,
+        userPrompt,
+      })
     }
 
-    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {})
-    const template = await loadRewriteWordsmithTemplate()
-    const userPrompt = render(template, {
-      persona: '',
-      original_bullet: bullet.text,
-      flag_type: flag.flag,
-      flag_reason: flag.why,
-      user_clarification: '',
-      output_schema: JSON.stringify(zodToJsonSchema(RewriteOutput)),
-    })
+    if (EVIDENCE_FLAGS.has(flag.flag)) {
+      // Find which role this bullet belongs to so we can pull gather answers.
+      const roleId = located.role === 'role'
+        ? stored.resume.roles[located.index]!.id
+        : null
+      const evidenceText = roleId ? this.formatEvidenceForRole(roleId) : ''
+      const allowed = new Set<string>([
+        ...extractNumbers(bullet.text),
+        ...extractNumbers(evidenceText),
+      ])
 
+      const template = await loadRewriteEvidencedTemplate()
+      const userPrompt = render(template, {
+        persona: '',
+        original_bullet: bullet.text,
+        flag_type: flag.flag,
+        flag_reason: flag.why,
+        evidence: evidenceText || '(no gather answers recorded for this role)',
+        output_schema: JSON.stringify(zodToJsonSchema(RewriteOutput)),
+      })
+
+      // First attempt
+      let result = await this.callRewrite({
+        templateName: 'rewrite-evidenced',
+        personaPrompt,
+        userPrompt,
+      })
+      let invented = findInventedNumbers(result, allowed)
+
+      if (invented.length > 0) {
+        // Retry once with verifier feedback inline
+        const retryPrompt =
+          userPrompt +
+          `\n\nA previous attempt invented these numeric tokens not present in the original bullet or evidence: ${invented.join(', ')}. ` +
+          `Re-issue the 2 candidates without those tokens. Tighten language only if the evidence is too thin.`
+        result = await this.callRewrite({
+          templateName: 'rewrite-evidenced',
+          personaPrompt,
+          userPrompt: retryPrompt,
+          verifierRejection: 1,
+        })
+        invented = findInventedNumbers(result, allowed)
+        if (invented.length > 0) {
+          throw new VerifierFailedError(invented, flag.flag)
+        }
+      }
+
+      return result
+    }
+
+    throw new EvidencedFlagNotSupportedError(flag.flag)
+  }
+
+  /**
+   * Stringify gather answers for a role into an evidence block.
+   * Skips unanswered turns and skip markers.
+   */
+  private formatEvidenceForRole(roleId: string): string {
+    const turns = this.gatherTurns.forRole(this.id, roleId)
+    const lines: string[] = []
+    for (const t of turns) {
+      if (t.turnKind === 'skip' || t.turnKind === 'done') continue
+      if (!t.question || !t.answer) continue
+      lines.push(`Q: ${t.question}\nA: ${t.answer}`)
+    }
+    return lines.join('\n\n')
+  }
+
+  /**
+   * Shared adapter-call helper for both rewrite flavors. Records telemetry
+   * (best-effort) regardless of success.
+   */
+  private async callRewrite(args: {
+    templateName: string
+    personaPrompt: string
+    userPrompt: string
+    verifierRejection?: number
+  }): Promise<RewriteOutput> {
     this.budget.recordCall()
     const callStart = Date.now()
-    let result: RewriteOutput
+    let result: RewriteOutput | undefined
     try {
       const out = await this.adapter.callInSession({
         sessionHandle: null,
         tier: 'main',
-        systemPrompt: personaPrompt,
-        userPrompt,
+        systemPrompt: args.personaPrompt,
+        userPrompt: args.userPrompt,
         schema: RewriteOutput,
       })
       result = out.result
+      return result
     } finally {
       try {
         this.modelCalls.record({
           sessionId: this.id,
-          templateName: 'rewrite-wordsmith',
+          templateName: args.templateName,
           provider: this.adapter.name,
           tier: 'main',
           tokensInEstimate: null,
           tokensOutEstimate: null,
           latencyMs: Date.now() - callStart,
           validationFailures: 0,
-          verifierRejections: 0,
+          verifierRejections: args.verifierRejection ?? 0,
         })
         this.sessions.incrementCalls(this.id)
       } catch (e) {
         console.warn(`[session] telemetry write failed: ${(e as Error).message}`)
       }
     }
-    return result!
   }
 
   currentResume(): Resume {
@@ -835,6 +938,24 @@ export class Session {
 }
 
 /**
+ * Return any numeric tokens present in a rewrite candidate's text but
+ * absent from the allowed set (= original bullet numbers ∪ evidence numbers).
+ * Returns the union across all candidates so the retry prompt sees everything.
+ */
+function findInventedNumbers(
+  rewrite: RewriteOutput,
+  allowed: ReadonlySet<string>,
+): string[] {
+  const invented = new Set<string>()
+  for (const candidate of rewrite.candidates) {
+    for (const tok of extractNumbers(candidate.text)) {
+      if (!allowed.has(tok)) invented.add(tok)
+    }
+  }
+  return Array.from(invented)
+}
+
+/**
  * Walk a Resume tree and replace every `id` field with a fresh crypto UUID.
  * Returns a deep copy with stamped IDs.
  */
@@ -893,6 +1014,15 @@ async function loadRewriteWordsmithTemplate(): Promise<string> {
     join(PROMPTS_DIR, 'templates/rewrite-wordsmith.md'),
   ).text()
   return cachedRewriteTemplate
+}
+
+let cachedRewriteEvidenced: string | null = null
+async function loadRewriteEvidencedTemplate(): Promise<string> {
+  if (cachedRewriteEvidenced) return cachedRewriteEvidenced
+  cachedRewriteEvidenced = await Bun.file(
+    join(PROMPTS_DIR, 'templates/rewrite-evidenced.md'),
+  ).text()
+  return cachedRewriteEvidenced
 }
 
 let cachedGatherBroad: string | null = null

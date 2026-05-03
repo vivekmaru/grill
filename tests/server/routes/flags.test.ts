@@ -132,7 +132,7 @@ describe('flag mutation routes', () => {
     expect(body.candidates).toHaveLength(2)
   })
 
-  it('POST .../rewrite returns 422 for evidence flag', async () => {
+  it('POST .../rewrite succeeds for an evidence flag when rewrite passes verifier', async () => {
     // Build a session with an unverified flag instead
     const app = buildTestApp()
     app.stub.responses.push({ type: 'ok', value: sampleResumeJson })
@@ -176,6 +176,23 @@ describe('flag mutation routes', () => {
       /* drain */
     }
 
+    // rewrite-evidenced response: clean, no invented numbers
+    app.stub.responses.push({
+      type: 'ok',
+      value: {
+        candidates: [
+          {
+            text: 'Hardened the CI pipeline so deploys ship cleanly.',
+            evidenceMap: [{ span: 'CI pipeline', source: 'original' }],
+          },
+          {
+            text: 'Rebuilt the CI pipeline to reduce manual fixes.',
+            evidenceMap: [{ span: 'CI pipeline', source: 'original' }],
+          },
+        ],
+      },
+    })
+
     const res = await app.fetch(
       jsonRequest(
         'POST',
@@ -183,8 +200,8 @@ describe('flag mutation routes', () => {
         {},
       ),
     )
-    expect(res.status).toBe(422)
-    const body = (await res.json()) as { error: { code: string } }
-    expect(body.error.code).toBe('evidenced_flag_not_supported')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { candidates: Array<{ text: string }> }
+    expect(body.candidates).toHaveLength(2)
   })
 })

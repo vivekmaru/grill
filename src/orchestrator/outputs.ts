@@ -37,7 +37,7 @@ export const RewriteOutput = z.object({
       evidenceMap: z.array(
         z.object({
           span: z.string(),
-          source: z.enum(['original', 'user', 'connective']),
+          source: z.enum(['original', 'user', 'connective', 'evidence']),
         }),
       ),
     }),

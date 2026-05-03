@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
 import { BudgetExceededError } from '@/orchestrator/budget'
-import { EvidencedFlagNotSupportedError } from '@/orchestrator/session'
+import { EvidencedFlagNotSupportedError, VerifierFailedError } from '@/orchestrator/session'
 
 export function respondWithError(c: Context, error: unknown): Response {
   if (error instanceof ZodError) {
@@ -20,6 +20,18 @@ export function respondWithError(c: Context, error: unknown): Response {
         },
       },
       429,
+    )
+  }
+  if (error instanceof VerifierFailedError) {
+    return c.json(
+      {
+        error: {
+          code: 'rewrite_verifier_failed',
+          flag: error.flag,
+          invented: error.invented,
+        },
+      },
+      422,
     )
   }
   if (error instanceof EvidencedFlagNotSupportedError) {
