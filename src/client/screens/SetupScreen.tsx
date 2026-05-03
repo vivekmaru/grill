@@ -2,7 +2,12 @@ import { useForm } from 'react-hook-form'
 import { useMutation } from '@tanstack/react-query'
 import { CreateSessionBody } from '@/server/schemas/routes'
 import { Archetype, Tone, Seniority } from '@/schema/target'
-import { createSession, type CreateSessionResponse, type ApiError } from '@/client/lib/api'
+import {
+  createSession,
+  proposePersona,
+  type CreateSessionResponse,
+  type ApiError,
+} from '@/client/lib/api'
 import { Button } from '@/client/components/ui/button'
 import { Input } from '@/client/components/ui/input'
 import { Textarea } from '@/client/components/ui/textarea'
@@ -41,6 +46,24 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
       jobDescription: '',
       archetype: 'engineering-manager',
       tone: 'skeptical',
+    },
+  })
+
+  const proposeMut = useMutation({
+    mutationFn: () => {
+      const v = form.getValues()
+      return proposePersona({
+        targetRole: v.targetRole,
+        targetSeniority: v.targetSeniority,
+        industry: v.industry || undefined,
+        jobDescription: v.jobDescription || undefined,
+      })
+    },
+    onSuccess: (res) => {
+      const arch = res.archetype as FormValues['archetype']
+      const tone = res.tone as FormValues['tone']
+      if (Archetype.options.includes(arch)) form.setValue('archetype', arch)
+      if (Tone.options.includes(tone)) form.setValue('tone', tone)
     },
   })
 
@@ -119,6 +142,22 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
             <div className="space-y-2">
               <Label htmlFor="jobDescription">Job description (optional)</Label>
               <Textarea id="jobDescription" rows={4} {...form.register('jobDescription')} />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="suggest-persona"
+                disabled={!form.watch('targetRole') || proposeMut.isPending}
+                onClick={() => proposeMut.mutate()}
+              >
+                {proposeMut.isPending ? 'Suggesting…' : 'Suggest persona from JD'}
+              </Button>
+              {proposeMut.data ? (
+                <span className="text-sm text-muted-foreground">{proposeMut.data.rationale}</span>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-4">

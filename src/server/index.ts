@@ -8,6 +8,7 @@ import { editRoutes } from './routes/edit'
 import { endRoutes } from './routes/end'
 import { exportRoutes } from './routes/export'
 import { gatherRoutes } from './routes/gather'
+import { personaRoutes } from './routes/persona'
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono()
@@ -23,6 +24,7 @@ export function createApp(deps: AppDeps): Hono {
   app.route('/api/sessions', editRoutes(deps))
   app.route('/api/sessions', endRoutes(deps))
   app.route('/api/sessions', exportRoutes(deps))
+  app.route('/api/persona', personaRoutes(deps))
 
   return app
 }

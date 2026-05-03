@@ -223,6 +223,22 @@ export async function endGather(args: {
   )
 }
 
+export async function proposePersona(args: {
+  targetRole: string
+  targetSeniority: string
+  industry?: string
+  jobDescription?: string
+}): Promise<{ archetype: string; tone: string; rationale: string }> {
+  return requestJson<{ archetype: string; tone: string; rationale: string }>(
+    `/api/persona/propose`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(args),
+    },
+  )
+}
+
 export type FinalReviewRisk = {
   bulletId?: string
   severity: 1 | 2 | 3

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { FlagType, Severity } from '@/schema/flags'
+import { Archetype, Tone } from '@/schema/target'
 
 /**
  * Output schema for the critique-scan template. The orchestrator parses
@@ -59,3 +60,15 @@ export const FinalReviewOutput = z.object({
 })
 
 export type FinalReviewOutput = z.infer<typeof FinalReviewOutput>
+
+/**
+ * Output schema for the persona-propose template. Suggests the archetype/
+ * tone pair that fits a target role + JD, with a one-line rationale.
+ */
+export const PersonaProposeOutput = z.object({
+  archetype: Archetype,
+  tone: Tone,
+  rationale: z.string(),
+})
+
+export type PersonaProposeOutput = z.infer<typeof PersonaProposeOutput>
