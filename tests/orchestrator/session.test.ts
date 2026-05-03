@@ -367,12 +367,68 @@ describe('Session — flag mutations', () => {
     expect(f.dismissedAt).toBeGreaterThan(0)
   })
 
-  it('editBullet updates the bullet text via EDIT_RESUME event', async () => {
+  it('editBullet updates the bullet text and status', async () => {
     const { session, bulletId } = await setupWithFlag()
     session.editBullet({ bulletId, newText: 'Manually rewritten' })
 
     const after = session.currentResume()
     expect(after.roles[0]!.bullets[0]!.text).toBe('Manually rewritten')
+    expect(after.roles[0]!.bullets[0]!.status).toBe('refined')
+  })
+})
+
+describe('Session — Project Bullet Bugs', () => {
+  let db: Database
+
+  beforeEach(() => {
+    db = createDb(':memory:')
+  })
+
+  it('persists flags for project bullets', async () => {
+    const resumeWithProject = {
+      ...sampleResumeJson,
+      roles: [],
+      projects: [{
+        id: 'p1',
+        name: 'Project 1',
+        description: 'Desc',
+        bullets: [{
+          id: 'b1',
+          text: 'Project bullet',
+          status: 'draft',
+          metrics: [],
+          skills: [],
+          flags: [],
+          sourceTurnIds: [],
+        }]
+      }]
+    }
+    const stub = createStubAdapter([{ type: 'ok', value: resumeWithProject }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+
+    const realBulletId = session.currentResume().projects[0]!.bullets[0]!.id
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        flags: [{
+          bulletId: realBulletId,
+          flag: 'vague',
+          severity: 2,
+          span: 'bullet',
+          why: 'why',
+          suggestedQuestion: 'What did you actually build?',
+        }],
+        passSummary: { bulletsScanned: 1, bulletsFlagged: 1, topConcern: '' },
+      },
+    })
+
+    for await (const _ of session.runCritique()) {}
+
+    const resume = session.currentResume()
+    expect(resume.projects[0]!.bullets[0]!.flags).toHaveLength(1)
+    expect(resume.projects[0]!.bullets[0]!.status).toBe('flagged')
   })
 })
 
@@ -518,6 +574,7 @@ describe('Session — end-to-end happy path', () => {
     expect(session.currentResume().roles[0]!.bullets[0]!.text).toBe(
       'Manually polished',
     )
+    expect(session.currentResume().roles[0]!.bullets[0]!.status).toBe('refined')
 
     session.endInterrogation()
     expect(session.snapshot().state).toBe('generate')

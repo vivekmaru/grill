@@ -562,6 +562,7 @@ export class Session {
             : r.projects[located.index]!.bullets
         const bullet = collection[located.bulletIndex]!
         bullet.text = args.newText
+        bullet.status = 'refined'
         return r
       })
       this.applyEvent({ type: 'EDIT_RESUME', patch: [] })
