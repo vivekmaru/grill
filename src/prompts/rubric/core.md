@@ -9,3 +9,11 @@ A bullet point should pass these tests:
 7. **No invented metrics.** Numbers, percentages, dollar figures, and headcounts must be real. If the candidate cannot remember the exact figure, drop the metric — never round up.
 
 These standards are the floor, not the ceiling. The candidate's target role and seniority may demand more (e.g., staff+ engineers should show technical depth and influence beyond their immediate team).
+
+**Calibration cues by signal strength.**
+
+- A bullet that *names* a system, *quantifies* a delta, and *credits* the candidate's specific decision is strong — leave it alone unless it's overlong.
+- A bullet that quantifies but doesn't name (or names but doesn't quantify) is workable — push for the missing half before flagging anything else.
+- A bullet that does neither is the loudest signal: surface the highest-severity flag that fits and ask one direct question.
+
+**A note on the JD.** When a job description is provided, prefer flags that move the bullet closer to *what this role evaluates* over flags that just clean up generic resume hygiene. A jd-mismatch flag at severity 2 is often more useful than two severity-1 wordings.
