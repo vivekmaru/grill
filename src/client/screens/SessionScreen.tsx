@@ -22,6 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/client/components/ui/card'
+import { GatherStep } from '@/client/components/GatherStep'
 
 interface SessionScreenProps {
   sessionId: number
@@ -246,6 +247,22 @@ export function SessionScreen({ sessionId }: SessionScreenProps) {
     return (
       <div className="mx-auto max-w-5xl px-4 text-sm text-destructive">
         {session.error.message}
+      </div>
+    )
+  }
+
+  if (session.data.snapshot.state === 'gather') {
+    return (
+      <div className="mx-auto max-w-2xl px-4">
+        <GatherStep
+          sessionId={sessionId}
+          roles={session.data.resume.roles.map((r) => ({
+            id: r.id,
+            company: r.company,
+            title: r.title,
+          }))}
+          onComplete={invalidate}
+        />
       </div>
     )
   }
