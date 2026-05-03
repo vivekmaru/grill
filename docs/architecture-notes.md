@@ -258,3 +258,28 @@ Phase: 2.
 **When this would change:** if Codex resume gains schema-constrained output support, the adapter can start returning and accepting a real handle without changing the HTTP API.
 
 Phase: 2.
+
+---
+
+## 2026-05-03 — DOM Testing with bun:test and happy-dom
+
+**Decision:** Our component tests use `happy-dom@15` via `@happy-dom/global-registrator` rather than `jsdom`. To test `react-hook-form` inputs, we bypass React's synthetic event system and invoke the component's `onChange` prop directly after setting the native value.
+
+**Why:** `bun:sqlite` requires `bun:test`, which is incompatible with `vitest`. The combination of `bun:test`, React 19's synthetic event delegation, and `happy-dom` means dispatched DOM events (`input`, `change`) don't reliably trigger React's internal state updates for controlled components like `react-hook-form` fields. The `fireReactChange` utility accesses the fiber node's props directly to force the update, ensuring forms can be tested without brittle timeout hacks.
+
+**When this would change:** if `bun:test` gains native browser-like event delegation support or a testing-library equivalent that robustly handles React 19 synthetic events in this environment.
+
+Phase: 2e.
+
+## 2026-05-03 — Gather phase storage and progression
+
+**Decision:** Gather turns persist in their own `gather_turns` table keyed by `(session_id, role_id)`, not on the resume blob. The orchestrator (`Session.nextGatherQuestion`) is authoritative on progression — frontend only renders whatever question the server hands back.
+
+**Why:**
+- Resume blob churn is high (every flag-accept rewrites `content_json`); gather text doesn't need to ride along.
+- Bullets' `sourceTurnIds` field is integer turn IDs — maps cleanly to a sibling table with FK on `sessions.id`.
+- Server-authoritative progression keeps the UI dumb (no follow-up counting client-side) and makes the cap (`MAX_FOLLOWUPS_PER_ROLE = 2`) impossible to bypass from a tampered client.
+
+**Transitional gate:** `sessions.gather_enabled` defaults to `1` for sessions created via `Session.create`, but `POST /api/sessions` defaults to opting OUT (passes `setGatherEnabled(false)` unless the body sends `gather: true`). This keeps the existing thin-slice route/e2e tests green; the frontend SetupScreen sends `gather: true` so real users hit the new flow. Plan: flip the route default once gather has soaked.
+
+Phase: 3a.
