@@ -319,7 +319,9 @@ export class Session {
       throw new Error('No target context — call setTarget first')
     }
 
-    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {})
+    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {
+      jdOverlay: buildJdOverlay(target),
+    })
     const template = await loadCritiqueTemplate()
     const rubricFlags = await loadRubricFlags()
 
@@ -678,7 +680,9 @@ export class Session {
       )
     }
 
-    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {})
+    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {
+      jdOverlay: buildJdOverlay(target),
+    })
 
     if (WORDSMITHING_FLAGS.has(flag.flag)) {
       const template = await loadRewriteWordsmithTemplate()
@@ -856,7 +860,9 @@ export class Session {
     const row = this.sessions.get(this.id)
     const target = row?.targetContext as TargetContext | null
     if (!target) throw new Error('No target context — call setTarget first')
-    return buildPersonaSystemPrompt(target.persona, {})
+    return buildPersonaSystemPrompt(target.persona, {
+      jdOverlay: buildJdOverlay(target),
+    })
   }
 
   /** Serialize the current target context as a JSON string for template slots. */
@@ -935,6 +941,30 @@ export class Session {
   getFlagsOnResume(): FlagInstance[] {
     throw new Error('not yet implemented')
   }
+}
+
+/**
+ * Compose the JD-grounded overlay block when the user provided a job
+ * description. Empty string disables the conditional in persona-system.md
+ * (the {{#if jdOverlay}}…{{/if}} block is skipped entirely).
+ *
+ * Why a helper: every adapter call should ground the persona in the JD if
+ * one is available, so this lives in one place rather than being inlined at
+ * each call site. The wrapper also leaves room to add JD distillation later
+ * (e.g. a precomputed "evaluation criteria" extraction) without touching
+ * call sites.
+ */
+function buildJdOverlay(target: TargetContext): string {
+  const jd = target.jobDescription?.trim()
+  if (!jd) return ''
+  const role = `${target.targetSeniority} ${target.targetRole}`.trim()
+  const industry = target.industry ? ` in ${target.industry}` : ''
+  return (
+    `The candidate is targeting a ${role} role${industry}. ` +
+    `Calibrate your standards and follow-ups to the requirements implied by this job description:\n\n` +
+    `---\n${jd}\n---\n\n` +
+    `When you flag a bullet, prefer concerns that matter for THIS role over generic resume hygiene.`
+  )
 }
 
 /**

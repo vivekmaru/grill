@@ -75,6 +75,38 @@ const sampleTarget: TargetContext = {
   persona: { archetype: 'engineering-manager', tone: 'skeptical' },
 }
 
+describe('Session — JD overlay', () => {
+  it('threads target.jobDescription into the persona system prompt for runCritique', async () => {
+    const db = createDb(':memory:')
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
+    session.setTarget({
+      ...sampleTarget,
+      industry: 'fintech',
+      jobDescription: 'Looking for someone who has shipped LATAM remittance flows.',
+    })
+
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        flags: [],
+        passSummary: { bulletsScanned: 1, bulletsFlagged: 0, topConcern: '' },
+      },
+    })
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+
+    const critiqueCall = stub.calls[1]!
+    expect(critiqueCall.systemPrompt).toContain('Standards specific to this role')
+    expect(critiqueCall.systemPrompt).toContain('LATAM remittance flows')
+    expect(critiqueCall.systemPrompt).toContain('staff Staff Engineer')
+    expect(critiqueCall.systemPrompt).toContain('in fintech')
+  })
+})
+
 describe('Session — setup phase', () => {
   let db: Database
 
