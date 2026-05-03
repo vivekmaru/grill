@@ -28,6 +28,8 @@ export interface SessionRepo {
   setActiveResume(id: number, resumeId: number): void
   setTargetContext(id: number, ctx: unknown): void
   setPersona(id: number, persona: unknown): void
+  getGatherEnabled(id: number): boolean
+  setGatherEnabled(id: number, enabled: boolean): void
 }
 
 interface SessionRow {
@@ -135,6 +137,16 @@ export function createSessionRepo(db: Database): SessionRepo {
     },
     setPersona(id, persona) {
       updPersona.run(JSON.stringify(persona), Date.now(), id)
+    },
+    getGatherEnabled(id) {
+      const row = db
+        .prepare(`SELECT gather_enabled AS g FROM sessions WHERE id = ?`)
+        .get(id) as { g: number } | null
+      if (!row) throw new Error(`Session not found: ${id}`)
+      return row.g === 1
+    },
+    setGatherEnabled(id, enabled) {
+      db.prepare(`UPDATE sessions SET gather_enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id)
     },
   }
 }

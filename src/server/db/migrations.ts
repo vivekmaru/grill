@@ -47,10 +47,36 @@ const STATEMENTS: readonly string[] = [
     FOREIGN KEY (session_id) REFERENCES sessions(id)
   )`,
   `CREATE INDEX IF NOT EXISTS idx_modelcalls_session ON model_calls(session_id)`,
+  `CREATE TABLE IF NOT EXISTS gather_turns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    role_id TEXT NOT NULL,
+    turn_kind TEXT NOT NULL CHECK (turn_kind IN ('broad', 'followup', 'skip', 'done')),
+    question TEXT,
+    answer TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_gather_turns_session_role
+    ON gather_turns(session_id, role_id, created_at)`,
+]
+
+// ALTER TABLE statements that are idempotent via try/catch (SQLite has no IF NOT EXISTS for ADD COLUMN)
+const ALTER_STATEMENTS: readonly string[] = [
+  `ALTER TABLE sessions ADD COLUMN gather_enabled INTEGER NOT NULL DEFAULT 1`,
 ]
 
 export function runMigrations(db: Database): void {
   for (const stmt of STATEMENTS) {
     db.run(stmt)
+  }
+  for (const stmt of ALTER_STATEMENTS) {
+    try {
+      db.run(stmt)
+    } catch (e: unknown) {
+      // Ignore "duplicate column" errors — column already exists from a prior migration run
+      const msg = e instanceof Error ? e.message : String(e)
+      if (!msg.includes('duplicate column')) throw e
+    }
   }
 }
