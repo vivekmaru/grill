@@ -415,6 +415,39 @@ describe('Session — flag mutations', () => {
     expect(f.dismissedAt).toBeGreaterThan(0)
   })
 
+  it('requires explicit confirmation before dismissing a severity-3 flag', async () => {
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
+    session.setTarget(sampleTarget)
+    const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        flags: [
+          {
+            bulletId,
+            flag: 'no-impact',
+            severity: 3,
+            span: 'CI pipeline',
+            why: 'No outcome.',
+            suggestedQuestion: 'What changed?',
+          },
+        ],
+        passSummary: { bulletsScanned: 1, bulletsFlagged: 1, topConcern: '' },
+      },
+    })
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+
+    expect(() => session.dismissFlag({ bulletId, flagIndex: 0 })).toThrow(/severity-3/)
+
+    session.dismissFlag({ bulletId, flagIndex: 0, confirmSeverity3: true })
+    expect(session.currentResume().roles[0]!.bullets[0]!.flags[0]!.dismissed).toBe(true)
+  })
+
   it('editBullet updates the bullet text and status', async () => {
     const { session, bulletId } = await setupWithFlag()
     session.editBullet({ bulletId, newText: 'Manually rewritten' })
@@ -643,9 +676,17 @@ describe('Session — proposeRewrites', () => {
 })
 
 describe('Session — endInterrogation', () => {
-  it('transitions to generate state from critique', async () => {
+  it('runs final review and transitions to generate state from critique', async () => {
     const stub = createStubAdapter([
       { type: 'ok', value: sampleResumeJson },
+      {
+        type: 'ok',
+        value: {
+          verdict: 'ready',
+          summary: 'Ready to export.',
+          remainingRisks: [],
+        },
+      },
     ])
     const session = Session.create(createDb(':memory:'), stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
@@ -653,15 +694,31 @@ describe('Session — endInterrogation', () => {
     session.setTarget(sampleTarget)
     expect(session.snapshot().state).toBe('critique')
 
-    session.endInterrogation()
+    await session.endInterrogation()
     expect(session.snapshot().state).toBe('generate')
+    expect(stub.calls.at(-1)!.userPrompt).toContain('holistic final review')
   })
 
-  it('throws if state does not allow it', () => {
+  it('blocks final review while severity-2+ flags are unresolved', async () => {
+    const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
+    const session = Session.create(createDb(':memory:'), stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
+    session.setTarget(sampleTarget)
+    const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
+    stub.responses.push({ type: 'ok', value: sampleCritiqueResponse(bulletId) })
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+
+    await expect(session.endInterrogation()).rejects.toThrow(/unresolved blocking flags/)
+  })
+
+  it('throws if state does not allow it', async () => {
     const stub = createStubAdapter([])
     const session = Session.create(createDb(':memory:'), stub.adapter)
     // state is 'ingest' — END_INTERROGATION not allowed
-    expect(() => session.endInterrogation()).toThrow(/not allowed/)
+    await expect(session.endInterrogation()).rejects.toThrow(/not allowed/)
   })
 })
 
@@ -698,10 +755,14 @@ describe('Session — end-to-end happy path', () => {
     )
     expect(session.currentResume().roles[0]!.bullets[0]!.status).toBe('refined')
 
-    session.endInterrogation()
+    stub.responses.push({
+      type: 'ok',
+      value: { verdict: 'ready', summary: 'Ready.', remainingRisks: [] },
+    })
+    await session.endInterrogation()
     expect(session.snapshot().state).toBe('generate')
 
-    expect(session.snapshot().modelCallsMade).toBe(2)
+    expect(session.snapshot().modelCallsMade).toBe(3)
   })
 })
 

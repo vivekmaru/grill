@@ -70,14 +70,24 @@ describe('end-to-end: setup → critique → accept → edit → end', () => {
     )
     expect(edit.status).toBe(200)
 
-    // 5. End interrogation
+    // 5. End interrogation (runs the final-review LLM pass internally)
+    stub.responses.push({
+      type: 'ok',
+      value: {
+        verdict: 'ready',
+        summary: 'Ready to export.',
+        remainingRisks: [],
+      },
+    })
     const end = await fetch(jsonRequest('POST', `/api/sessions/${id}/end`, {}))
     expect(end.status).toBe(200)
     const endBody = (await end.json()) as {
       snapshot: { state: string; modelCallsMade: number }
+      review: { verdict: string }
     }
     expect(endBody.snapshot.state).toBe('generate')
-    expect(endBody.snapshot.modelCallsMade).toBe(2) // ingest + critique
+    expect(endBody.snapshot.modelCallsMade).toBe(3) // ingest + critique + final-review
+    expect(endBody.review.verdict).toBe('ready')
 
     // 6. Final GET shows the manual edit
     const get = await fetch(new Request(`http://localhost/api/sessions/${id}`))

@@ -45,3 +45,17 @@ export const RewriteOutput = z.object({
 })
 
 export type RewriteOutput = z.infer<typeof RewriteOutput>
+
+export const FinalReviewOutput = z.object({
+  verdict: z.enum(['ready', 'needs-work']),
+  summary: z.string(),
+  remainingRisks: z.array(
+    z.object({
+      bulletId: z.string().optional(),
+      severity: Severity,
+      reason: z.string(),
+    }),
+  ),
+})
+
+export type FinalReviewOutput = z.infer<typeof FinalReviewOutput>

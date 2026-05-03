@@ -6,6 +6,7 @@ async function setupWithFlag(): Promise<{
   app: ReturnType<typeof buildTestApp>
   id: number
   bulletId: string
+  flagIndex: number
 }> {
   const app = buildTestApp()
   app.stub.responses.push({ type: 'ok', value: sampleResumeJson })
@@ -51,7 +52,7 @@ async function setupWithFlag(): Promise<{
     /* drain */
   }
 
-  return { app, id, bulletId }
+  return { app, id, bulletId, flagIndex: 0 }
 }
 
 describe('flag mutation routes', () => {
@@ -106,6 +107,67 @@ describe('flag mutation routes', () => {
       }
     }
     expect(body.resume.roles[0]!.bullets[0]!.flags[0]!.dismissed).toBe(true)
+  })
+
+  it('requires confirmation to dismiss severity-3 flags', async () => {
+    const app = buildTestApp()
+    app.stub.responses.push({ type: 'ok', value: sampleResumeJson })
+    const created = await app.fetch(
+      jsonRequest('POST', '/api/sessions', {
+        resume: { kind: 'markdown', text: '# Hi' },
+        target: sampleTarget,
+      }),
+    )
+    const { id, resume } = (await created.json()) as {
+      id: number
+      resume: { roles: Array<{ bullets: Array<{ id: string }> }> }
+    }
+    const bulletId = resume.roles[0]!.bullets[0]!.id
+    app.stub.responses.push({
+      type: 'ok',
+      value: {
+        flags: [
+          {
+            bulletId,
+            flag: 'no-impact',
+            severity: 3,
+            span: 'CI pipeline',
+            why: 'No impact.',
+            suggestedQuestion: 'What changed?',
+          },
+        ],
+        passSummary: { bulletsScanned: 1, bulletsFlagged: 1, topConcern: '' },
+      },
+    })
+    const critRes = await app.fetch(
+      new Request(`http://localhost/api/sessions/${id}/critique`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      }),
+    )
+    const reader = critRes.body!.getReader()
+    while (!(await reader.read()).done) {
+      /* drain */
+    }
+
+    const blocked = await app.fetch(
+      jsonRequest(
+        'POST',
+        `/api/sessions/${id}/bullets/${bulletId}/flags/0/dismiss`,
+        {},
+      ),
+    )
+    expect(blocked.status).toBe(409)
+
+    const confirmed = await app.fetch(
+      jsonRequest(
+        'POST',
+        `/api/sessions/${id}/bullets/${bulletId}/flags/0/dismiss`,
+        { confirmSeverity3: true },
+      ),
+    )
+    expect(confirmed.status).toBe(200)
   })
 
   it('POST .../rewrite returns 2 candidates', async () => {

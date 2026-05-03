@@ -4,6 +4,8 @@ import { FlagType, Severity, FlagInstance } from '@/schema/flags'
 describe('FlagType', () => {
   it.each([
     'unverified', 'no-impact', 'inflated',
+    'specificity', 'seniority-mismatch', 'jd-mismatch',
+    'metric-risk', 'wording-weakness',
     'vague', 'passive', 'length',
     'jargon', 'stale',
   ])('accepts %s', (flag) => {

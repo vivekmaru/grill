@@ -89,6 +89,7 @@ export function flagsRoutes(deps: AppDeps): Hono {
         bulletId: ids.bulletId,
         flagIndex: ids.flagIdx,
         reason: parsed.data.reason,
+        confirmSeverity3: parsed.data.confirmSeverity3,
       })
       return c.json({ ok: true })
     } catch (e) {

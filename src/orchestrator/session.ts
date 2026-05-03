@@ -11,8 +11,8 @@ import type { FlagInstance } from '@/schema/flags'
 import { reduce } from '@/state/reducer'
 import { replay } from '@/state/replay'
 import type { State } from '@/state/states'
-import { CritiqueScanOutput, RewriteOutput } from './outputs'
-import type { FlagType } from '@/schema/flags'
+import { CritiqueScanOutput, RewriteOutput, FinalReviewOutput } from './outputs'
+import type { FlagType, Severity } from '@/schema/flags'
 import { buildPersonaSystemPrompt } from './personaPrompt'
 import {
   createSessionRepo,
@@ -80,6 +80,22 @@ const EVIDENCE_FLAGS: ReadonlySet<FlagType> = new Set<FlagType>([
   'stale',
 ])
 
+export class BlockingFlagsError extends Error {
+  constructor(
+    public readonly blockers: ReadonlyArray<{
+      bulletId: string
+      flag: FlagType
+      severity: Severity
+    }>,
+  ) {
+    super(
+      `Cannot finish interrogation: ${blockers.length} unresolved blocking flags ` +
+        `(severity ≥ 2) remain. Triage them via accept/skip/dismiss first.`,
+    )
+    this.name = 'BlockingFlagsError'
+  }
+}
+
 export class VerifierFailedError extends Error {
   constructor(
     public readonly invented: ReadonlyArray<string>,
@@ -130,6 +146,7 @@ export class Session {
   private readonly modelCalls: ModelCallsRepo
   private readonly budget: BudgetEnforcer
   private readonly gatherTurns: GatherTurnsRepo
+  private lastFinalReview: FinalReviewOutput | null = null
 
   private constructor(
     private readonly id: number,
@@ -627,7 +644,24 @@ export class Session {
     bulletId: string
     flagIndex: number
     reason?: string
+    confirmSeverity3?: boolean
   }): void {
+    // Pre-check severity outside the transaction so we don't half-mutate
+    const resume = this.currentResume()
+    const located = this.findBullet(resume, args.bulletId)
+    if (!located.ok) throw new Error(`Bullet not found: ${args.bulletId}`)
+    const probeCollection =
+      located.role === 'role'
+        ? resume.roles[located.index]!.bullets
+        : resume.projects[located.index]!.bullets
+    const probeFlag = probeCollection[located.bulletIndex]!.flags[args.flagIndex]
+    if (probeFlag && probeFlag.severity === 3 && !args.confirmSeverity3) {
+      throw new Error(
+        `Refusing to dismiss severity-3 flag without confirmation. ` +
+          `Pass confirmSeverity3: true to acknowledge.`,
+      )
+    }
+
     this.db.transaction(() => {
       this.mutateResume((r) => {
         const located = this.findBullet(r, args.bulletId)
@@ -842,8 +876,110 @@ export class Session {
     })()
   }
 
-  endInterrogation(): void {
+  /**
+   * End the interrogation: run the holistic final-review pass and transition
+   * critique → finalReview → generate. Refuses if any non-dismissed,
+   * non-resolved severity-2+ flags remain (the candidate must triage them
+   * first).
+   *
+   * `lastFinalReview` is exposed via {@link getLastFinalReview} so callers
+   * can show the review notes after the transition.
+   */
+  async endInterrogation(): Promise<FinalReviewOutput> {
+    if (this.state !== 'critique' && this.state !== 'gather') {
+      throw new Error(
+        `END_INTERROGATION not allowed in state '${this.state}'`,
+      )
+    }
+
+    if (this.state === 'critique') {
+      this.assertNoBlockingFlags()
+    }
+
+    const sessionRow = this.sessions.get(this.id)
+    if (!sessionRow?.activeResumeId) throw new Error('No active resume')
+    const stored = this.resumes.get(sessionRow.activeResumeId)
+    if (!stored) throw new Error('Resume row missing')
+    const target = sessionRow.targetContext as TargetContext
+    if (!target) throw new Error('No target context')
+
+    const personaPrompt = await buildPersonaSystemPrompt(target.persona, {
+      jdOverlay: buildJdOverlay(target),
+    })
+    const template = await loadFinalReviewTemplate()
+    const userPrompt = render(template, {
+      persona: '',
+      resume_json: JSON.stringify(stored.resume),
+      target_context: JSON.stringify(target),
+      output_schema: JSON.stringify(zodToJsonSchema(FinalReviewOutput)),
+    })
+
+    this.budget.recordCall()
+    const callStart = Date.now()
+    let result: FinalReviewOutput
+    try {
+      const out = await this.adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt: personaPrompt,
+        userPrompt,
+        schema: FinalReviewOutput,
+      })
+      result = out.result
+    } finally {
+      try {
+        this.modelCalls.record({
+          sessionId: this.id,
+          templateName: 'final-review',
+          provider: this.adapter.name,
+          tier: 'main',
+          tokensInEstimate: null,
+          tokensOutEstimate: null,
+          latencyMs: Date.now() - callStart,
+          validationFailures: 0,
+          verifierRejections: 0,
+        })
+        this.sessions.incrementCalls(this.id)
+      } catch (e) {
+        console.warn(`[session] telemetry write failed: ${(e as Error).message}`)
+      }
+    }
+
+    this.lastFinalReview = result!
     this.applyEvent({ type: 'END_INTERROGATION' })
+    return result!
+  }
+
+  getLastFinalReview(): FinalReviewOutput | null {
+    return this.lastFinalReview
+  }
+
+  /**
+   * Block ending interrogation when the candidate hasn't triaged severity-2+
+   * critique flags. Severity-1 may slip through; severity-3 is permitted only
+   * via explicit dismissal (see {@link dismissFlag}).
+   *
+   * A flag counts as "unresolved" when:
+   *   - it is not dismissed AND
+   *   - the bullet's status is still 'flagged' (not refined/accepted)
+   */
+  private assertNoBlockingFlags(): void {
+    const resume = this.currentResume()
+    const blockers: Array<{ bulletId: string; flag: FlagType; severity: Severity }> = []
+    const collect = (bullets: Resume['roles'][number]['bullets']) => {
+      for (const b of bullets) {
+        if (b.status !== 'flagged') continue
+        for (const f of b.flags) {
+          if (f.dismissed) continue
+          if (f.severity >= 2) blockers.push({ bulletId: b.id, flag: f.flag, severity: f.severity })
+        }
+      }
+    }
+    for (const r of resume.roles) collect(r.bullets)
+    for (const p of resume.projects) collect(p.bullets)
+    if (blockers.length > 0) {
+      throw new BlockingFlagsError(blockers)
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1044,6 +1180,15 @@ async function loadRewriteWordsmithTemplate(): Promise<string> {
     join(PROMPTS_DIR, 'templates/rewrite-wordsmith.md'),
   ).text()
   return cachedRewriteTemplate
+}
+
+let cachedFinalReview: string | null = null
+async function loadFinalReviewTemplate(): Promise<string> {
+  if (cachedFinalReview) return cachedFinalReview
+  cachedFinalReview = await Bun.file(
+    join(PROMPTS_DIR, 'templates/final-review.md'),
+  ).text()
+  return cachedFinalReview
 }
 
 let cachedRewriteEvidenced: string | null = null

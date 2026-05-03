@@ -21,6 +21,7 @@ export type SkipFlagBody = z.infer<typeof SkipFlagBody>
 
 export const DismissFlagBody = z.object({
   reason: z.string().optional(),
+  confirmSeverity3: z.boolean().optional(),
 })
 export type DismissFlagBody = z.infer<typeof DismissFlagBody>
 

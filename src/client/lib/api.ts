@@ -160,12 +160,18 @@ export async function editBullet(args: {
   })
 }
 
-export async function endSession(sessionId: number): Promise<void> {
-  await requestJson<{ snapshot: SessionSnapshot }>(`/api/sessions/${sessionId}/end`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: '{}',
-  })
+export async function endSession(sessionId: number): Promise<{
+  snapshot: SessionSnapshot
+  review: FinalReview
+}> {
+  return requestJson<{ snapshot: SessionSnapshot; review: FinalReview }>(
+    `/api/sessions/${sessionId}/end`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    },
+  )
 }
 
 export type GatherQuestion =
@@ -215,4 +221,16 @@ export async function endGather(args: {
     `/api/sessions/${args.sessionId}/gather/end`,
     { method: 'POST' },
   )
+}
+
+export type FinalReviewRisk = {
+  bulletId?: string
+  severity: 1 | 2 | 3
+  reason: string
+}
+
+export type FinalReview = {
+  verdict: 'ready' | 'needs-work'
+  summary: string
+  remainingRisks: FinalReviewRisk[]
 }

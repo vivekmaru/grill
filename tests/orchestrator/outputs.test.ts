@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import {
   CritiqueScanOutput,
+  FinalReviewOutput,
   RewriteOutput,
 } from '@/orchestrator/outputs'
 
@@ -10,11 +11,11 @@ describe('CritiqueScanOutput', () => {
       flags: [
         {
           bulletId: 'b1',
-          flag: 'vague',
+          flag: 'jd-mismatch',
           severity: 2,
           span: 'collaborated',
-          why: 'Vague verb with no specifics.',
-          suggestedQuestion: 'What did collaboration look like?',
+          why: 'A hiring manager for this role will ask why this maps to the JD.',
+          suggestedQuestion: 'Which JD requirement does this prove?',
         },
       ],
       passSummary: {
@@ -61,6 +62,24 @@ describe('CritiqueScanOutput', () => {
         passSummary: { bulletsScanned: 1, bulletsFlagged: 1, topConcern: '' },
       }),
     ).toThrow()
+  })
+})
+
+describe('FinalReviewOutput', () => {
+  it('parses a final-review response with remaining risks', () => {
+    const result = FinalReviewOutput.parse({
+      verdict: 'ready',
+      summary: 'The resume is ready for the selected target.',
+      remainingRisks: [
+        {
+          bulletId: 'b1',
+          severity: 1,
+          reason: 'One internal acronym remains but it is low risk.',
+        },
+      ],
+    })
+    expect(result.verdict).toBe('ready')
+    expect(result.remainingRisks[0]!.bulletId).toBe('b1')
   })
 })
 

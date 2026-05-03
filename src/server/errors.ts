@@ -1,7 +1,11 @@
 import type { Context } from 'hono'
 import { ZodError } from 'zod'
 import { BudgetExceededError } from '@/orchestrator/budget'
-import { EvidencedFlagNotSupportedError, VerifierFailedError } from '@/orchestrator/session'
+import {
+  EvidencedFlagNotSupportedError,
+  VerifierFailedError,
+  BlockingFlagsError,
+} from '@/orchestrator/session'
 
 export function respondWithError(c: Context, error: unknown): Response {
   if (error instanceof ZodError) {
@@ -20,6 +24,18 @@ export function respondWithError(c: Context, error: unknown): Response {
         },
       },
       429,
+    )
+  }
+  if (error instanceof BlockingFlagsError) {
+    return c.json(
+      {
+        error: {
+          code: 'final_review_blocked',
+          blockers: error.blockers,
+          message: error.message,
+        },
+      },
+      409,
     )
   }
   if (error instanceof VerifierFailedError) {
@@ -48,6 +64,17 @@ export function respondWithError(c: Context, error: unknown): Response {
   if (error instanceof Error) {
     if (/Session not found/.test(error.message)) {
       return c.json({ error: { code: 'session_not_found' } }, 404)
+    }
+    if (/severity-3/.test(error.message)) {
+      return c.json(
+        {
+          error: {
+            code: 'severity_3_confirmation_required',
+            message: error.message,
+          },
+        },
+        409,
+      )
     }
     if (/not allowed/.test(error.message)) {
       return c.json(
