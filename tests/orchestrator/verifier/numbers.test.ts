@@ -8,11 +8,11 @@ describe('extractNumbers', () => {
     expect(tokens).toContain('2.5%')
   })
 
-  it('extracts dollar amounts with K/M/B suffixes', () => {
+  it('extracts dollar amounts with k/m/b suffixes (normalized)', () => {
     const tokens = extractNumbers('Drove $1.2M in revenue, saved $500K, raised $10B')
-    expect(tokens).toContain('$1.2M')
-    expect(tokens).toContain('$500K')
-    expect(tokens).toContain('$10B')
+    expect(tokens).toContain('$1.2m')
+    expect(tokens).toContain('$500k')
+    expect(tokens).toContain('$10b')
   })
 
   it('extracts plain dollar amounts', () => {
