@@ -27,7 +27,9 @@ describe('loadEnv', () => {
 
   it('applies defaults for unset values', () => {
     const env = loadEnv({})
-    expect(env.AI_PROVIDER).toBe('claude')
+    expect(env.AI_PROVIDER).toBe('codex')
+    expect(env.OPENAI_BIN).toBe('codex')
+    expect(env.OPENAI_MAIN_MODEL).toBe('gpt-5')
     expect(env.PORT).toBe(4321)
     expect(env.NODE_ENV).toBe('development')
     expect(env.CLAUDE_BARE_MODE).toBe(true)

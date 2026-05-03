@@ -12,8 +12,12 @@ A privacy-first, local-first AI resume builder that interrogates your resume rat
 bun install
 bun run test         # run the test suite
 bun run type-check   # verify TypeScript
-bun run dev          # start the server (work-in-progress)
+RESUME_BUILDER_MOCK_CODEX=1 bun run dev
 ```
+
+Phase 2 runs through Codex by default. For real local model calls, install and
+authenticate the Codex CLI, then run `bun run dev`. The mock flag above keeps
+the UI smoke path local and deterministic.
 
 ## Architecture
 
@@ -22,6 +26,7 @@ bun run dev          # start the server (work-in-progress)
 - bun:sqlite for local persistence
 - Zod schemas as the single source of truth
 - Event-sourced state machine
-- Local CLI orchestration (Claude / Codex / Gemini) — wired up in sub-plan 2
+- Local CLI orchestration via Codex in Phase 2
+- Claude adapter preserved and tested for future multi-provider work, but inactive in runtime wiring
 
 See `PRD.md` §2 for the full architecture rationale.

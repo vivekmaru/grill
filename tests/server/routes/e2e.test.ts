@@ -88,10 +88,15 @@ describe('end-to-end: setup → critique → accept → edit → end', () => {
       'Final version after manual polish',
     )
 
-    // 7. Export still 501 (stub)
+    // 7. Export returns a real ATS PDF
     const exp = await fetch(
       new Request(`http://localhost/api/sessions/${id}/export.pdf`),
     )
-    expect(exp.status).toBe(501)
+    expect(exp.status).toBe(200)
+    expect(exp.headers.get('content-type')).toBe('application/pdf')
+    const header = new TextDecoder().decode(
+      new Uint8Array(await exp.arrayBuffer()).slice(0, 8),
+    )
+    expect(header).toBe('%PDF-1.4')
   })
 })

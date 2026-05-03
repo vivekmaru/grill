@@ -1,8 +1,12 @@
 import index from '../client/index.html'
 import { createApp } from './index'
 import { createDb } from './db/client'
+import { loadEnv, type Env } from '@/lib/env'
+import { createCodexAdapter } from '@/prompts/adapters/codex'
 import type { ProviderAdapter } from '@/prompts/adapters/types'
 import type { Resume } from '@/schema/resume'
+
+export const DEV_SERVER_IDLE_TIMEOUT_SECONDS = 255
 
 const sampleIngest: Resume = {
   version: 1,
@@ -38,24 +42,98 @@ const sampleIngest: Resume = {
   certifications: [],
 }
 
-const stubAdapter: ProviderAdapter = {
-  name: 'claude',
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  callInSession: async (_args): Promise<{ result: any; sessionHandle: null }> => ({
-    result: sampleIngest,
-    sessionHandle: null,
-  }),
+function firstBulletIdFromPrompt(prompt: string): string {
+  return prompt.match(/"bullets"\s*:\s*\[\s*\{[^}]*"id"\s*:\s*"([^"]+)"/)?.[1] ?? 'b1'
 }
 
-const db = createDb(process.env.DATABASE_FILE ?? './dev.db')
-const app = createApp({ db, adapter: stubAdapter })
+function createMockCodexAdapter(): ProviderAdapter {
+  return {
+    name: 'codex',
+    async callInSession({ userPrompt, schema }) {
+      let result: unknown
+      if (userPrompt.includes('Return exactly 2 candidates')) {
+        result = {
+          candidates: [
+            {
+              text: 'Built a reliable CI pipeline for engineering releases.',
+              evidenceMap: [
+                { span: 'Built', source: 'original' },
+                { span: 'reliable', source: 'connective' },
+              ],
+            },
+            {
+              text: 'Improved the CI pipeline used by the engineering team.',
+              evidenceMap: [
+                { span: 'CI pipeline', source: 'original' },
+                { span: 'improved', source: 'connective' },
+              ],
+            },
+          ],
+        }
+      } else if (userPrompt.includes('Resume to critique')) {
+        const bulletId = firstBulletIdFromPrompt(userPrompt)
+        result = {
+          flags: [
+            {
+              bulletId,
+              flag: 'vague',
+              severity: 2,
+              span: 'Built a thing.',
+              why: 'A hiring manager will ask what changed and why it mattered.',
+              suggestedQuestion: 'What measurable outcome did this work create?',
+            },
+          ],
+          passSummary: {
+            bulletsScanned: 1,
+            bulletsFlagged: 1,
+            topConcern: 'The resume needs sharper impact evidence.',
+          },
+        }
+      } else {
+        result = sampleIngest
+      }
+      return { result: schema.parse(result), sessionHandle: null }
+    },
+  }
+}
 
-const server = Bun.serve({
-  port: Number(process.env.PORT ?? 3000),
-  routes: { '/': index },
-  fetch: (req) => app.fetch(req),
-  development: { hmr: true, console: true },
-})
+export function createDevAdapter(
+  env: Env,
+  processEnv: Record<string, string | undefined> = process.env,
+): ProviderAdapter {
+  if (processEnv.RESUME_BUILDER_MOCK_CODEX === '1') {
+    return createMockCodexAdapter()
+  }
+  if (env.AI_PROVIDER !== 'codex') {
+    console.warn(
+      `[dev] AI_PROVIDER=${env.AI_PROVIDER} is inactive in Phase 2; using codex.`,
+    )
+  }
+  return createCodexAdapter({
+    bin: env.OPENAI_BIN,
+    mainModel: env.OPENAI_MAIN_MODEL,
+    verifierModel: env.OPENAI_VERIFIER_MODEL,
+  })
+}
 
-console.log(`▶ resume-builder dev server: http://localhost:${server.port}`)
-console.log('  (using stub adapter — TODO 2h: wire createClaudeAdapter)')
+if (import.meta.main) {
+  const env = loadEnv(process.env)
+  const db = createDb(process.env.DATABASE_FILE ?? './dev.db')
+  const adapter = createDevAdapter(env)
+  const app = createApp({ db, adapter })
+
+  const server = Bun.serve({
+    port: Number(process.env.PORT ?? env.PORT),
+    routes: { '/': index },
+    fetch: (req) => app.fetch(req),
+    idleTimeout: DEV_SERVER_IDLE_TIMEOUT_SECONDS,
+    development: { hmr: true, console: true },
+  })
+
+  console.log(`resume-builder dev server: http://localhost:${server.port}`)
+  console.log(
+    process.env.RESUME_BUILDER_MOCK_CODEX === '1'
+      ? 'using mock Codex adapter'
+      : `using Codex adapter (${env.OPENAI_BIN}, ${env.OPENAI_MAIN_MODEL})`,
+  )
+}

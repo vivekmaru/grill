@@ -277,11 +277,18 @@ export class Session {
     const template = await loadCritiqueTemplate()
     const rubricFlags = await loadRubricFlags()
 
-    const dismissedBulletIds = stored.resume.roles.flatMap((r) =>
-      r.bullets
-        .filter((b) => b.flags.some((f) => f.dismissed))
-        .map((b) => b.id),
-    )
+    const dismissedBulletIds = [
+      ...stored.resume.roles.flatMap((r) =>
+        r.bullets
+          .filter((b) => b.flags.some((f) => f.dismissed))
+          .map((b) => b.id),
+      ),
+      ...stored.resume.projects.flatMap((p) =>
+        p.bullets
+          .filter((b) => b.flags.some((f) => f.dismissed))
+          .map((b) => b.id),
+      ),
+    ]
 
     const userPrompt = render(template, {
       persona: '', // already in systemPrompt
@@ -330,23 +337,24 @@ export class Session {
     // Persist the flags onto the resume in one transaction
     const updatedResume: Resume = JSON.parse(JSON.stringify(stored.resume))
     for (const f of parsed.flags) {
-      for (const role of updatedResume.roles) {
-        for (const bullet of role.bullets) {
-          if (bullet.id === f.bulletId) {
-            const flagInstance: FlagInstance = {
-              flag: f.flag,
-              severity: f.severity,
-              span: f.span,
-              why: f.why,
-              suggestedQuestion: f.suggestedQuestion,
-              dismissed: false,
-              dismissedAt: null,
-            }
-            bullet.flags.push(flagInstance)
-            bullet.status = 'flagged'
-          }
-        }
+      const located = this.findBullet(updatedResume, f.bulletId)
+      if (!located.ok) continue
+      const collection =
+        located.role === 'role'
+          ? updatedResume.roles[located.index]!.bullets
+          : updatedResume.projects[located.index]!.bullets
+      const bullet = collection[located.bulletIndex]!
+      const flagInstance: FlagInstance = {
+        flag: f.flag,
+        severity: f.severity,
+        span: f.span,
+        why: f.why,
+        suggestedQuestion: f.suggestedQuestion,
+        dismissed: false,
+        dismissedAt: null,
       }
+      bullet.flags.push(flagInstance)
+      bullet.status = 'flagged'
     }
     this.db.transaction(() => {
       this.resumes.update(sessionRow.activeResumeId!, {

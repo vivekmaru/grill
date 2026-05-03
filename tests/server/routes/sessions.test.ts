@@ -31,7 +31,7 @@ describe('POST /api/sessions', () => {
     }
     expect(body.id).toBeGreaterThan(0)
     expect(body.snapshot.state).toBe('critique')
-    expect(body.snapshot.provider).toBe('claude')
+    expect(body.snapshot.provider).toBe('codex')
     expect(body.resume.roles).toHaveLength(1)
   })
 

@@ -14,7 +14,7 @@ export interface TestApp {
 
 export function buildTestApp(): TestApp {
   const db = createDb(':memory:')
-  const stub = createStubAdapter([])
+  const stub = createStubAdapter([], { name: 'codex' })
   const app = createApp({ db, adapter: stub.adapter })
   return {
     fetch: async (req) => app.fetch(req),

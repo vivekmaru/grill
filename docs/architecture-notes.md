@@ -71,11 +71,11 @@ Phase: 2 (spec).
 
 ## 2026-05-02 — Markdown → Resume JSON via LLM call
 
-**Decision:** When the user submits the setup form, the orchestrator makes one Claude call to convert pasted markdown into structured `Resume` JSON. No regex parser. The call is counted against the session budget.
+**Decision:** When the user submits the setup form, the orchestrator makes one model call to convert pasted markdown into structured `Resume` JSON. No regex parser. The call is counted against the session budget. Originally this was written against Claude; the 2026-05-03 Phase 2 runtime entry supersedes the provider choice to Codex.
 
 **Why not regex:** real resumes deviate from any strict markdown convention. A regex parser would break on the first user who uses `**` instead of `###` for role headers. LLM is robust to formatting drift.
 
-**Cost:** ~1 model call per session start (~$0.01–$0.02 with Claude Haiku, ~5s latency).
+**Cost:** ~1 model call per session start; exact cost and latency depend on the configured Codex model.
 
 **Risk:** if the LLM mis-parses (lost roles, jumbled dates), the critique becomes garbage-in/garbage-out. Mitigation: explicit dogfood task in sub-plan 2 — verify parsed JSON on the user's actual resume before continuing.
 
@@ -201,7 +201,7 @@ Phase: 2c.
 
 **Decision:** `createApp` accepts `{ db, adapter }` — one DB, one provider adapter, both built once at startup. Tests inject a stub adapter via the same shape.
 
-**Why:** v2 ships single-provider (Claude). A factory or per-request adapter would solve a problem we don't have. Restart the process to swap providers; sub-plan 4 introduces the adapter-pick UX.
+**Why:** v2 ships a single active provider. A factory or per-request adapter would solve a problem we don't have. Restart the process to swap providers; sub-plan 4 introduces the adapter-pick UX. The 2026-05-03 Phase 2 runtime entry records that the active provider is Codex.
 
 **When this would change:** sub-plan 4 if multiple providers are configured concurrently. The adapter would become `Map<ProviderName, ProviderAdapter>` and route handlers would pick by `session.provider`. Migration is mechanical.
 
@@ -230,3 +230,31 @@ Phase: 2d.
 **Implication:** if a route handler reaches for a repo or imports a schema from `@/orchestrator/outputs`, it's drifted from this shape. New domain logic goes in Session.
 
 Phase: 2d.
+
+---
+
+## 2026-05-03 — Phase 2 runtime is Codex-only
+
+**Decision:** Phase 2 runtime wiring uses Codex as the only active provider. `AI_PROVIDER` defaults to `codex`, `src/server/dev.ts` constructs `createCodexAdapter(loadEnv(process.env))`, and local UI smoke tests use `RESUME_BUILDER_MOCK_CODEX=1` to select a deterministic Codex-named stub.
+
+**Claude state:** `src/prompts/adapters/claude.ts` remains in the repo, is unit-tested, and keeps its skipped real-CLI integration test. It is not wired into dev or Phase 2 runtime after this entry. The known abort-handling caveat from "Claude adapter abort race" remains documented for future provider work.
+
+**Why:** the installed Codex CLI exposes schema-constrained `codex exec`, which is enough for the Phase 2 ingest, critique, and rewrite calls. Keeping only one active runtime provider avoids provider picker UI and mid-session switching behavior while the thin slice is still being completed.
+
+**When this would change:** a later multi-provider phase can re-enable Claude and Gemini behind an explicit provider selection flow and health checks.
+
+Phase: 2.
+
+---
+
+## 2026-05-03 — Codex resume continuity deferred
+
+**Decision:** The Codex adapter treats `sessionHandle` as always `null` and never calls `codex exec resume` in Phase 2.
+
+**Why:** the installed CLI exposes a resume subcommand, but not the `--output-schema` path on that subcommand. Phase 2 needs schema-constrained outputs more than provider-side conversation continuity, so every Codex call is a fresh `codex exec` invocation in an empty temporary directory with a read-only sandbox.
+
+**Implication:** continuity comes from the orchestrator prompts and persisted session state, not from Codex CLI session memory. This is acceptable for Phase 2 because each prompt includes the current structured resume, target context, and flag context it needs.
+
+**When this would change:** if Codex resume gains schema-constrained output support, the adapter can start returning and accepting a real handle without changing the HTTP API.
+
+Phase: 2.

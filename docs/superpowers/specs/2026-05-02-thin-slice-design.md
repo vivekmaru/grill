@@ -2,7 +2,7 @@
 
 - **Date:** 2026-05-02
 - **Status:** Approved (pending user review of this written spec)
-- **Scope:** The first end-to-end usable cut of the resume builder. Takes the foundation (`v0.1.0-foundation`) and ships: Claude provider only, two prompt templates (`critique-scan`, `rewrite-wordsmith`), one PDF template (Gold Standard, ATS-ready), a two-screen UI (`/setup`, `/session/:id`).
+- **Scope:** The first end-to-end usable cut of the resume builder. Takes the foundation (`v0.1.0-foundation`) and ships: Codex provider only for runtime, two prompt templates (`critique-scan`, `rewrite-wordsmith`), one PDF template (Gold Standard, ATS-ready), and a two-screen UI (`/setup`, `/session/:id`).
 - **Stack assumed:** Bun + Hono + bun:sqlite + Zod (existing), plus Vite + React 19 + Tailwind + shadcn/ui + `@react-pdf/renderer` + `zod-to-json-schema`.
 - **Out of scope:** other providers, gather phase, evidenced rewrites, verifier, JD overlay, other PDF templates, DOCX, CodeMirror, session-restore UI. See §11.
 
@@ -54,6 +54,8 @@ A `Session` instance is created/loaded per HTTP request. Holds repo references a
 
 **Rejected:** stateless function library (per-route boilerplate proliferates); event bus / actor (overkill for single-user localhost).
 
+**Implementation deviation recorded 2026-05-03:** Phase 2 runtime is Codex-only. The Claude adapter remains preserved and tested for future multi-provider work, but is inactive in dev/runtime wiring. Codex CLI session resume is deferred because schema-constrained resume is not exposed by the installed CLI.
+
 ---
 
 ## 3. Architecture
@@ -75,7 +77,8 @@ src/
 │   │   └── rewrite-wordsmith.md
 │   └── adapters/
 │       ├── types.ts                  # ProviderAdapter interface, AdapterError
-│       ├── claude.ts                 # Claude CLI adapter
+│       ├── claude.ts                 # Claude CLI adapter, preserved but inactive in Phase 2 runtime
+│       ├── codex.ts                  # Codex CLI adapter used by Phase 2 runtime
 │       └── parse.ts                  # JSON-island extraction + Zod retry helper
 ├── orchestrator/                     # NEW
 │   ├── session.ts                    # the Session class
@@ -236,11 +239,11 @@ export interface SessionSnapshot {
 1. **`runCritique` is `AsyncIterable<CritiqueEvent>`, not `Promise<...>`**. Lets routes pipe events directly to the SSE response. Each flag arrives at the UI as soon as the model emits it.
 2. **`proposeRewrites` is on-demand, not pre-computed.** When the user advances to a flag, the route calls `proposeRewrites`. We don't burn calls generating rewrites for flags the user dismisses without looking at.
 3. **Sub-plan 2 supports `vague`/`passive`/`length`/`jargon` rewrites only.** For `unverified`/`no-impact`/`inflated`/`stale`, `proposeRewrites` throws `EvidencedFlagNotSupportedError` — UI catches it and shows the "Edit my own" textbox seeded with the original.
-4. **`ingestResume` makes one Claude call** to convert pasted markdown into structured Resume JSON. Counted against the budget. The adapter's `parseOrRetry` handles one schema-validation retry internally; `ingestResume` itself does not retry on top of that. Sub-plan 3 adds `'pdf-text'` as a third `kind` value; the rest of the pipeline reuses.
+4. **`ingestResume` makes one Codex call** to convert pasted markdown into structured Resume JSON. Counted against the budget. The adapter's `parseOrRetry` handles one schema-validation retry internally; `ingestResume` itself does not retry on top of that. Sub-plan 3 adds `'pdf-text'` as a third `kind` value; the rest of the pipeline reuses.
 
 ---
 
-## 5. Provider adapter — interface + Claude implementation
+## 5. Provider adapter — interface + Codex implementation
 
 ### 5.1 Shared interface
 
@@ -272,7 +275,26 @@ export class AdapterError extends Error {
 }
 ```
 
-### 5.2 Claude adapter
+### 5.2 Codex adapter
+
+Spawns `codex exec` via `Bun.spawn` with these flags:
+
+```bash
+codex exec - \
+  --json \
+  --output-schema <tmp-schema.json> \
+  --output-last-message <tmp-out.txt> \
+  --model "<env-configured model for tier>" \
+  --sandbox read-only \
+  --ephemeral \
+  --skip-git-repo-check \
+  --ignore-rules \
+  --cd <empty-temp-dir>
+```
+
+The adapter writes the JSON Schema converted from Zod to the temporary schema file, sends `systemPrompt + "\n\n" + userPrompt` through stdin, reads the final-message file, and validates with `parseOrRetry`. On retry, it runs one fresh `codex exec` call with the corrective prompt. It always returns `sessionHandle: null` in Phase 2.
+
+### 5.3 Claude adapter preserved
 
 Spawns `claude -p` via `Bun.spawn` with these flags:
 
@@ -294,7 +316,9 @@ Stream-json events processed:
 - `{ type: 'result', result, structured_output? }` → final; run `parseOrRetry` on `structured_output` first, falling back to a JSON island extracted from `result`.
 - `{ type: 'system', subtype: 'api_retry' }` → log to stderr, continue.
 
-### 5.3 Bare-mode strict honoring
+Claude implementation exists in `src/prompts/adapters/claude.ts`, is unit-tested, and has a skipped real-CLI integration test. It is not active in Phase 2 runtime wiring. Future multi-provider work can re-enable it after revisiting the documented abort race caveat in `docs/architecture-notes.md`.
+
+### 5.4 Bare-mode strict honoring
 
 `CLAUDE_BARE_MODE` is read once at adapter construction. Both values strictly honored — the adapter never reads `~/.claude` directly:
 
@@ -305,7 +329,7 @@ Stream-json events processed:
 
 If `CLAUDE_BARE_MODE=true` but `ANTHROPIC_API_KEY` is missing, the adapter throws `AdapterError('CLAUDE_BARE_MODE=true requires ANTHROPIC_API_KEY...', 'auth-failed')` at construction. Clear failure mode, never a silent confusion.
 
-### 5.4 `parseOrRetry`
+### 5.5 `parseOrRetry`
 
 ```ts
 // src/prompts/adapters/parse.ts
@@ -322,7 +346,7 @@ export async function parseOrRetry<T>(
 }
 ```
 
-### 5.5 Dependency addition
+### 5.6 Dependency addition
 
 `zod-to-json-schema` (~5KB pure JS, no native deps). Used to convert Zod output schemas to JSON Schema for the `--json-schema` flag.
 
@@ -592,10 +616,10 @@ Sub-plan 2 creates this file and seeds it with these decisions. Future sub-plans
 
 1. **SSE: no reconnect logic.** Localhost-only app, network drops shouldn't happen, server-side replay of in-flight events is real engineering for a non-problem.
 2. **Critique flags: client-side sort.** Streaming is preserved; server-side sort would require buffering entire pass before emitting first flag.
-3. **Claude bare mode: default `true`.** Three tradeoffs of `false`: per-call startup cost (plugins/MCP/skills re-init each call); non-determinism (local config affects behavior); surprise interception (a user's PreToolUse hook could break our calls).
+3. **Phase 2 runtime is Codex-only.** Claude bare mode remains documented for the preserved adapter, but dev/runtime wiring uses Codex unless the explicit mock Codex flag is set.
 4. **Schema vs JSON Resume: don't conform internally.** Our `Bullet` carries `flags`/`status`/`sourceTurnIds` — the interrogation IP. JSON Resume's `highlights` is just a string. Map at the I/O boundary instead (sub-plan 5/6 task).
 5. **Resume input v2: paste-markdown only.** PDF and blank-canvas land together in sub-plan 3.
-6. **Markdown→Resume JSON via LLM call.** No regex parser; one Claude call per ingest. Counted against budget.
+6. **Markdown->Resume JSON via LLM call.** No regex parser; one Codex call per ingest. Counted against budget.
 7. **PDF component cross-import.** Lives in `frontend/src/pdf/` but imported server-side via tsconfig paths. Sub-plan 7 binary build emits browser + server bundles from the same source.
 8. **Resume mutation: snapshot, not delta.** Whole `content_json` rewritten on every accept. Simpler reasoning, cheap at this scale.
 9. **`model_calls` writes outside the transaction.** Telemetry is best-effort; never fails a user action.
@@ -610,7 +634,7 @@ Single map. Implementation plans for sub-plans 3+ pull from this.
 | Sub-plan | Items |
 |---|---|
 | **3 — richer prompts** | PDF upload via `unpdf`; blank-canvas mode; gather phase (broad + funnel follow-ups); `persona-propose` template; JD web overlay; evidenced rewrites (`rewrite-evidenced`); Tier-2 LLM verifier; rubric tuning task (calibrate severity thresholds against real model output); `final-review` template + UI surface |
-| **4 — other providers** | Codex adapter; Gemini adapter; provider-lock UX (read-only badge after lock); CLI health check on app boot; provider-pick guidance UI |
+| **4 — other providers** | Reactivate Claude adapter; add Gemini adapter; provider-lock UX (read-only badge after lock); CLI health check on app boot; provider-pick guidance UI |
 | **5 — full export** | 4 remaining PDF templates (Modern Playful, Skills-Forward, Deep Tech, Minimalist); DOCX export via `docx` npm package; template picker UI; **stretch: JSON Resume import/export** (unlocks the JSON Resume themes ecosystem as additional rendering paths) |
 | **6 — UI polish** | shadcn primitives applied throughout; severity-1 light dismissal flow; budget overage modal + live usage panel; CodeMirror inline editor; session-restore UI; optimistic UI updates if measured slow; multi-page PDF render debouncing; severity color coding refinement |
 | **7 — distribution** | `bun build --compile` single binary; full README (covering bare-mode tradeoffs for end users, provider selection, env vars, data dir); AGENTS.md (coding instructions for future AI contributors); font registration packaging into binary; OS-specific data dir resolution (`~/Library/Application Support/...` etc.); CLI binary path config |
@@ -622,7 +646,7 @@ Single map. Implementation plans for sub-plans 3+ pull from this.
 Sub-plan 2 ships when the author can perform the following end-to-end on his own real resume:
 
 1. **Setup.** Open `localhost:4321/setup`, paste real resume markdown, set target role + seniority + archetype + tone, click "Start critique".
-2. **Conversion.** Resume markdown converts to structured Resume JSON via one Claude call. Roles, dates, bullets all correctly identified (acceptable: minor field misclassification noticeable in preview).
+2. **Conversion.** Resume markdown converts to structured Resume JSON via one Codex call. Roles, dates, bullets all correctly identified (acceptable: minor field misclassification noticeable in preview).
 3. **Critique.** Within ~10 seconds, 3–8 flags appear progressively in the inbox via SSE. Each flag is meaningful — recruiter-voice critique, not generic "make this better" advice.
 4. **Fix.** For at least 2 word-smithing flags (`vague`/`passive`/`length`/`jargon`), 2 candidate rewrites appear; user picks one or uses "Edit my own". PDF preview updates immediately on the left.
 5. **Stand-by.** For at least 1 flag, user clicks "Stand by it", confirms the modal, flag dismisses and stops surfacing.
@@ -636,7 +660,7 @@ If steps 1–8 all pass, sub-plan 2 ships. If step 8 fails ("no bullet genuinely
 
 ## 13. Risks worth naming
 
-1. **Markdown→Resume JSON conversion quality.** If Claude regularly mis-parses real resumes (jumbled dates, lost roles), critique becomes garbage-in/garbage-out. **Mitigation:** dogfood early — first task after orchestrator works is "paste resume, inspect parsed JSON". If first 3 real-world resumes don't parse cleanly, fix the prompt before continuing.
+1. **Markdown->Resume JSON conversion quality.** If Codex regularly mis-parses real resumes (jumbled dates, lost roles), critique becomes garbage-in/garbage-out. **Mitigation:** dogfood early - first task after orchestrator works is "paste resume, inspect parsed JSON". If first 3 real-world resumes don't parse cleanly, fix the prompt before continuing.
 
 2. **`@react-pdf/renderer` live re-render performance.** A 2-page resume might re-render 50+ times in a session. Sluggish (>500ms) re-renders make the UX bad. **Mitigation:** measure during dogfood; if slow, debounce updates to 250ms.
 

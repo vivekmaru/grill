@@ -87,7 +87,7 @@ The interrogator's prompt strategy is the core IP of the product. Designed in de
 *   **Templates with named slots** — six markdown templates (one per state-machine phase that calls a model), filled at runtime with a tiny mustache-style renderer. No fragment library, no template engine.
 *   **Persona = archetype + tone**, decoupled. 7 archetypes (Engineering Manager, Director of Engineering, Tech Recruiter, VP Product, Founder, Staff/Principal IC, Department Head). 4 tones. Combinations like "Engineering Manager + coaching" for friendly first pass; same archetype + adversarial for hardening.
 *   **Grounding:** thin hand-curated baseline rubric, augmented per-session with 1–3 high-confidence standards distilled from a single web search keyed off the JD. Falls back silently to baseline if grounding fails.
-*   **Provider adapters:** thin per-provider files (`claude.ts`, `gemini.ts`, `openai.ts`) playing to each CLI's strengths (Claude's `--json-schema` and `--bare` mode, Codex's `--output-schema` and `exec resume`, Gemini's tolerant parser path with orchestrator-managed transcript).
+*   **Provider adapters:** thin per-provider files (`codex.ts`, `claude.ts`, `gemini.ts`) playing to each CLI's strengths. Phase 2 runtime is Codex-only; the Claude adapter is preserved and tested but inactive until future multi-provider work.
 *   **Anti-hallucination:** every rewrite passes a tiered verifier — deterministic regex for numbers (Tier 1, always runs after evidence rewrites), cheap-LLM call for named entities (Tier 2, only when Tier 1 passes).
 
 ---
@@ -112,7 +112,7 @@ claude -p --bare \
   --json-schema '<inline>' \
   --resume <session_id>
 
-# Codex (file-based JSON schema, native session resume)
+# Codex (Phase 2 runtime: file-based JSON schema, no resume continuity yet)
 codex exec - --json \
   --output-schema /tmp/<turn>.schema.json \
   --output-last-message /tmp/<turn>.out
@@ -122,6 +122,9 @@ gemini -p "<full_prompt>" \
   --output-format json \
   -m $GEMINI_MAIN_MODEL
 ```
+
+Phase 2 intentionally does not use Codex CLI resume continuity because the
+installed resume subcommand does not expose the schema-constrained output path.
 
 Configurable via `.env`:
 ```

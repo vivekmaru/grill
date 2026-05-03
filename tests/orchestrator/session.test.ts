@@ -241,6 +241,46 @@ describe('Session — runCritique', () => {
     // because of stub timing — covered indirectly by acceptFlag in Task 12.
     expect(realBulletId.length).toBeGreaterThan(0)
   })
+
+  it('runCritique persists matched project-bullet flags onto the right project bullet', async () => {
+    const projectResumeJson = {
+      ...sampleResumeJson,
+      roles: [],
+      projects: [
+        {
+          id: 'will-be-replaced-project',
+          name: 'Signal Recycler',
+          description: 'Local-first workflow tool.',
+          bullets: [
+            {
+              id: 'will-be-replaced-project-bullet',
+              text: 'Built intake automation',
+              status: 'draft',
+              metrics: [],
+              skills: [],
+              flags: [],
+              sourceTurnIds: [],
+            },
+          ],
+        },
+      ],
+    }
+    const stub = createStubAdapter([{ type: 'ok', value: projectResumeJson }])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+
+    const bulletId = session.currentResume().projects[0]!.bullets[0]!.id
+    stub.responses.push({ type: 'ok', value: sampleCritiqueResponse(bulletId) })
+
+    for await (const _ of session.runCritique()) {
+      /* drain */
+    }
+
+    const bullet = session.currentResume().projects[0]!.bullets[0]!
+    expect(bullet.flags).toHaveLength(1)
+    expect(bullet.status).toBe('flagged')
+  })
 })
 
 const sampleCritiqueResponse = (bulletId: string) => ({

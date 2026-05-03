@@ -1,4 +1,4 @@
-import type { ZodSchema } from 'zod'
+import { z, type ZodSchema } from 'zod'
 import { AdapterError } from './types'
 
 /**
@@ -58,6 +58,47 @@ function tryExtract(raw: string): unknown | null {
   return null
 }
 
+function normalizeForSchema(value: unknown, schema: z.ZodTypeAny): unknown {
+  if (schema instanceof z.ZodOptional) {
+    if (value === null) return undefined
+    return normalizeForSchema(value, schema.unwrap())
+  }
+  if (schema instanceof z.ZodDefault) {
+    if (value === null) return undefined
+    return normalizeForSchema(value, schema.removeDefault())
+  }
+  if (schema instanceof z.ZodNullable) {
+    if (value === null) return null
+    return normalizeForSchema(value, schema.unwrap())
+  }
+  if (schema instanceof z.ZodArray) {
+    if (!Array.isArray(value)) return value
+    return value.map((item) => normalizeForSchema(item, schema.element))
+  }
+  if (schema instanceof z.ZodObject) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const shape = schema.shape
+    const out: Record<string, unknown> = {}
+    for (const [key, fieldSchema] of Object.entries(shape)) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue
+      const normalized = normalizeForSchema(
+        (value as Record<string, unknown>)[key],
+        fieldSchema as z.ZodTypeAny,
+      )
+      if (normalized !== undefined) out[key] = normalized
+    }
+    return out
+  }
+  return value
+}
+
+function safeParseNormalized<T>(
+  schema: ZodSchema<T>,
+  value: unknown,
+): ReturnType<ZodSchema<T>['safeParse']> {
+  return schema.safeParse(normalizeForSchema(value, schema as z.ZodTypeAny))
+}
+
 /**
  * Extract a JSON object from `raw`, validate it against `schema`. On schema
  * failure, call `retry()` ONCE for a corrective response and re-validate.
@@ -76,7 +117,7 @@ export async function parseOrRetry<T>(
 ): Promise<T> {
   const first = tryExtract(raw)
   if (first !== null) {
-    const r = schema.safeParse(first)
+    const r = safeParseNormalized(schema, first)
     if (r.success) return r.data
     // Schema failure → retry once
     const retryRaw = await retry()
@@ -87,7 +128,7 @@ export async function parseOrRetry<T>(
         'parse-failed',
       )
     }
-    const r2 = schema.safeParse(second)
+    const r2 = safeParseNormalized(schema, second)
     if (r2.success) return r2.data
     throw new AdapterError(
       `schema validation failed after retry: ${r2.error.message}`,
@@ -104,7 +145,7 @@ export async function parseOrRetry<T>(
       'parse-failed',
     )
   }
-  const r = schema.safeParse(second)
+  const r = safeParseNormalized(schema, second)
   if (r.success) return r.data
   throw new AdapterError(
     `schema validation failed on retry: ${r.error.message}`,

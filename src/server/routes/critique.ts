@@ -4,6 +4,8 @@ import { Session } from '@/orchestrator/session'
 import { respondWithError } from '@/server/errors'
 import type { AppDeps } from '@/server/deps'
 
+export const CRITIQUE_SSE_KEEPALIVE_MS = 5_000
+
 export function critiqueRoutes(deps: AppDeps): Hono {
   const router = new Hono()
 
@@ -28,7 +30,32 @@ export function critiqueRoutes(deps: AppDeps): Hono {
       stream.onAbort(() => ac.abort())
 
       try {
-        for await (const evt of session.runCritique({ signal: ac.signal })) {
+        const iterator = session.runCritique({ signal: ac.signal })[
+          Symbol.asyncIterator
+        ]()
+
+        while (!stream.aborted) {
+          const next = iterator.next()
+          let outcome = await Promise.race([
+            next.then((result) => ({ type: 'event' as const, result })),
+            stream
+              .sleep(CRITIQUE_SSE_KEEPALIVE_MS)
+              .then(() => ({ type: 'keepalive' as const })),
+          ])
+
+          while (outcome.type === 'keepalive' && !stream.aborted) {
+            await stream.write(': keepalive\n\n')
+            outcome = await Promise.race([
+              next.then((result) => ({ type: 'event' as const, result })),
+              stream
+                .sleep(CRITIQUE_SSE_KEEPALIVE_MS)
+                .then(() => ({ type: 'keepalive' as const })),
+            ])
+          }
+
+          if (stream.aborted || outcome.type === 'keepalive') break
+          if (outcome.result.done) break
+          const evt = outcome.result.value
           await stream.writeSSE({
             event: evt.type,
             data: JSON.stringify(evt),

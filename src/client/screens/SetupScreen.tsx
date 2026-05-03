@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useMutation } from '@tanstack/react-query'
 import { CreateSessionBody } from '@/server/schemas/routes'
@@ -27,8 +26,11 @@ type FormValues = {
   tone: (typeof Tone.options)[number]
 }
 
-export function SetupScreen() {
-  const [created, setCreated] = useState<CreateSessionResponse | null>(null)
+interface SetupScreenProps {
+  onSessionCreated?: (session: CreateSessionResponse) => void
+}
+
+export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
 
   const form = useForm<FormValues>({
     defaultValues: {
@@ -57,35 +59,8 @@ export function SetupScreen() {
       const parsed = CreateSessionBody.parse(body)
       return createSession(parsed)
     },
-    onSuccess: (res) => setCreated(res),
+    onSuccess: (res) => onSessionCreated?.(res),
   })
-
-  if (created) {
-    const bulletCount = created.resume.roles.reduce((n, r) => n + r.bullets.length, 0)
-    return (
-      <div className="mx-auto max-w-2xl px-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Session created</CardTitle>
-            <CardDescription>
-              Session ID: {created.id} — state: {created.snapshot.state}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <p>
-              Ingested {created.resume.roles.length} role(s) with {bulletCount} bullet(s).
-            </p>
-            <p className="text-muted-foreground">Critique view arrives in phase 2f.</p>
-          </CardContent>
-          <CardFooter>
-            <Button variant="outline" onClick={() => setCreated(null)}>
-              Start over
-            </Button>
-          </CardFooter>
-        </Card>
-      </div>
-    )
-  }
 
   return (
     <div className="mx-auto max-w-2xl px-4">

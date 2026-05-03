@@ -41,6 +41,21 @@ describe('parseOrRetry', () => {
     expect(result.note).toBe('contains } a brace')
   })
 
+  it('treats null for optional fields as absent while preserving nullable fields', async () => {
+    const Schema = z.object({
+      optionalText: z.string().optional(),
+      defaultedItems: z.array(z.string()).default([]),
+      nullableText: z.string().nullable(),
+    })
+    const retry = async () => { throw new Error('should not be called') }
+    const result = await parseOrRetry(
+      '{"optionalText":null,"defaultedItems":null,"nullableText":null}',
+      Schema,
+      retry,
+    )
+    expect(result).toEqual({ nullableText: null, defaultedItems: [] })
+  })
+
   it('retries once on schema mismatch and succeeds', async () => {
     let calls = 0
     const retry = async () => {
