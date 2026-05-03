@@ -31,3 +31,9 @@ export const EditBulletBody = z.object({
   newText: z.string().min(1),
 })
 export type EditBulletBody = z.infer<typeof EditBulletBody>
+
+export const GatherAnswerBody = z.object({
+  turnId: z.number().int().positive(),
+  answer: z.string().min(1),
+})
+export type GatherAnswerBody = z.infer<typeof GatherAnswerBody>

@@ -7,6 +7,7 @@ import { flagsRoutes } from './routes/flags'
 import { editRoutes } from './routes/edit'
 import { endRoutes } from './routes/end'
 import { exportRoutes } from './routes/export'
+import { gatherRoutes } from './routes/gather'
 
 export function createApp(deps: AppDeps): Hono {
   const app = new Hono()
@@ -16,6 +17,7 @@ export function createApp(deps: AppDeps): Hono {
   )
 
   app.route('/api/sessions', sessionsRoutes(deps))
+  app.route('/api/sessions', gatherRoutes(deps))
   app.route('/api/sessions', critiqueRoutes(deps))
   app.route('/api/sessions', flagsRoutes(deps))
   app.route('/api/sessions', editRoutes(deps))
