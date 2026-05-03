@@ -108,12 +108,23 @@ describe('Session — setup phase', () => {
     expect(session.snapshot().state).toBe('target')
   })
 
-  it('setTarget persists context+persona and fast-forwards to critique', async () => {
+  it('setTarget with gather_enabled=true leaves session in gather state', async () => {
     const stub = createStubAdapter([
       { type: 'ok', value: sampleResumeJson },
     ])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setTarget(sampleTarget)
+    expect(session.snapshot().state).toBe('gather')
+  })
+
+  it('setTarget with gather_enabled=false fast-forwards to critique', async () => {
+    const stub = createStubAdapter([
+      { type: 'ok', value: sampleResumeJson },
+    ])
+    const session = Session.create(db, stub.adapter)
+    await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
     expect(session.snapshot().state).toBe('critique')
   })
@@ -129,6 +140,8 @@ describe('Session — setup phase', () => {
 async function setupSessionToCritique(db: Database, stub: ReturnType<typeof createStubAdapter>) {
   const session = Session.create(db, stub.adapter)
   await session.ingestResume({ kind: 'markdown', text: '# x' })
+  // Disable gather so setTarget auto-transitions to critique (legacy test path)
+  session.setGatherEnabled(false)
   session.setTarget(sampleTarget)
   return session
 }
@@ -231,6 +244,7 @@ describe('Session — runCritique', () => {
     ])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const resume = session.currentResume()
@@ -268,6 +282,7 @@ describe('Session — runCritique', () => {
     const stub = createStubAdapter([{ type: 'ok', value: projectResumeJson }])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const bulletId = session.currentResume().projects[0]!.bullets[0]!.id
@@ -314,6 +329,7 @@ describe('Session — flag mutations', () => {
     const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
@@ -406,6 +422,7 @@ describe('Session — Project Bullet Bugs', () => {
     const stub = createStubAdapter([{ type: 'ok', value: resumeWithProject }])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const realBulletId = session.currentResume().projects[0]!.bullets[0]!.id
@@ -447,6 +464,7 @@ describe('Session — proposeRewrites', () => {
     const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
@@ -483,6 +501,7 @@ describe('Session — proposeRewrites', () => {
     const stub = createStubAdapter([{ type: 'ok', value: sampleResumeJson }])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const bulletId = session.currentResume().roles[0]!.bullets[0]!.id
@@ -529,6 +548,7 @@ describe('Session — endInterrogation', () => {
     ])
     const session = Session.create(createDb(':memory:'), stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
     expect(session.snapshot().state).toBe('critique')
 
@@ -559,6 +579,7 @@ describe('Session — end-to-end happy path', () => {
     ])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
     expect(session.snapshot().state).toBe('critique')
 
@@ -598,6 +619,7 @@ describe('Session — runCritique signal pass-through', () => {
     ])
     const session = Session.create(db, stub.adapter)
     await session.ingestResume({ kind: 'markdown', text: '# x' })
+    session.setGatherEnabled(false)
     session.setTarget(sampleTarget)
 
     const ac = new AbortController()

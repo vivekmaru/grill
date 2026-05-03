@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import type { Database } from 'bun:sqlite'
+import { z } from 'zod'
 import type { ProviderAdapter } from '@/prompts/adapters/types'
 import type { Event } from '@/schema/events'
 import { Resume } from '@/schema/resume'
@@ -34,7 +35,25 @@ import {
   createBudgetEnforcer,
   type BudgetEnforcer,
 } from './budget'
+import { GatherTurnsRepo } from '@/server/db/repositories/gatherTurns'
 import { MAX_MODEL_CALLS_PER_SESSION } from '@/config/critique'
+
+// ---------------------------------------------------------------------------
+// Gather schemas + constants
+// ---------------------------------------------------------------------------
+
+const MAX_FOLLOWUPS_PER_ROLE = 2
+
+const GatherBroadOutput = z.object({ question: z.string().min(1) })
+
+const GatherFollowupOutput = z.discriminatedUnion('done', [
+  z.object({ done: z.literal(true), reason: z.string() }),
+  z.object({
+    done: z.literal(false),
+    followUp: z.string().min(1),
+    trigger: z.enum(['scope', 'outcome', 'time', 'context']),
+  }),
+])
 
 export class EvidencedFlagNotSupportedError extends Error {
   constructor(public readonly flag: FlagType) {
@@ -89,6 +108,7 @@ export class Session {
   private readonly history: HistoryRepo
   private readonly modelCalls: ModelCallsRepo
   private readonly budget: BudgetEnforcer
+  private readonly gatherTurns: GatherTurnsRepo
 
   private constructor(
     private readonly id: number,
@@ -103,6 +123,7 @@ export class Session {
     this.history = createHistoryRepo(db)
     this.modelCalls = createModelCallsRepo(db)
     this.budget = budget
+    this.gatherTurns = new GatherTurnsRepo(db)
   }
 
   static create(db: Database, adapter: ProviderAdapter): Session {
@@ -245,7 +266,11 @@ export class Session {
     })()
     this.applyEvent({ type: 'SET_TARGET', ctx })
     this.applyEvent({ type: 'CONFIRM_PERSONA' })
-    this.applyEvent({ type: 'BEGIN_CRITIQUE' })
+    if (this.sessions.getGatherEnabled(this.getId())) {
+      // Stay in 'gather'; client will drive nextGatherQuestion calls.
+    } else {
+      this.applyEvent({ type: 'BEGIN_CRITIQUE' })
+    }
   }
 
   async *runCritique(
@@ -389,6 +414,147 @@ export class Session {
       flagCount: parsed.flags.length,
       durationMs: Date.now() - startMs,
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Gather methods
+  // ---------------------------------------------------------------------------
+
+  async nextGatherQuestion(args: { roleId: string }): Promise<
+    | { kind: 'broad' | 'followup'; turnId: number; question: string }
+    | { kind: 'done'; reason: string }
+  > {
+    if (this.state !== 'gather') throw new Error('not allowed: not in gather state')
+    const role = this.findRole(args.roleId)
+    if (!role) throw new Error(`Role not found: ${args.roleId}`)
+
+    const existing = this.gatherTurns.forRole(this.getId(), args.roleId)
+    const hasBroad = existing.some((t) => t.turnKind === 'broad')
+    const followupCount = this.gatherTurns.countFollowups(this.getId(), args.roleId)
+
+    if (!hasBroad) {
+      // Broad question
+      const tpl = await loadGatherBroadTemplate()
+      const systemPrompt = await this.buildSystemPrompt()
+      const userPrompt = render(tpl, {
+        persona: systemPrompt,
+        role_company: role.company,
+        role_title: role.title,
+        role_dates: `${role.startDate} – ${role.endDate ?? 'present'}`,
+        existing_bullets: role.bullets.map((b) => `- ${b.text}`).join('\n') || '(none)',
+        target_context: this.targetContextString(),
+      })
+      this.budget.recordCall()
+      const callStart = Date.now()
+      let out: { result: z.infer<typeof GatherBroadOutput> }
+      try {
+        out = await this.adapter.callInSession({
+          sessionHandle: null,
+          tier: 'main',
+          systemPrompt,
+          userPrompt,
+          schema: GatherBroadOutput,
+        })
+      } finally {
+        this.recordTelemetry('gather-broad', callStart)
+      }
+      const turnId = this.gatherTurns.insertQuestion({
+        sessionId: this.getId(),
+        roleId: args.roleId,
+        turnKind: 'broad',
+        question: out!.result.question,
+      })
+      return { kind: 'broad', turnId, question: out!.result.question }
+    }
+
+    // Cap check — return done without calling the adapter
+    if (followupCount >= MAX_FOLLOWUPS_PER_ROLE) {
+      const turnId = this.gatherTurns.insertQuestion({
+        sessionId: this.getId(),
+        roleId: args.roleId,
+        turnKind: 'done',
+        question: null,
+      })
+      void turnId
+      return { kind: 'done', reason: 'follow-up cap reached' }
+    }
+
+    // Follow-up question
+    const userAnswerSoFar = existing
+      .filter((t) => t.answer)
+      .map((t) => `Q: ${t.question}\nA: ${t.answer}`)
+      .join('\n\n')
+    const followupsAsked =
+      existing
+        .filter((t) => t.turnKind === 'followup')
+        .map((t) => `- ${t.question}`)
+        .join('\n') || '(none)'
+
+    const tpl = await loadGatherFollowupTemplate()
+    const systemPrompt = await this.buildSystemPrompt()
+    const userPrompt = render(tpl, {
+      persona: systemPrompt,
+      role_company: role.company,
+      role_title: role.title,
+      user_answer_so_far: userAnswerSoFar || '(no answer yet)',
+      followups_already_asked: followupsAsked,
+    })
+    this.budget.recordCall()
+    const callStart = Date.now()
+    let out: { result: z.infer<typeof GatherFollowupOutput> }
+    try {
+      out = await this.adapter.callInSession({
+        sessionHandle: null,
+        tier: 'main',
+        systemPrompt,
+        userPrompt,
+        schema: GatherFollowupOutput,
+      })
+    } finally {
+      this.recordTelemetry('gather-followup', callStart)
+    }
+
+    if (out!.result.done) {
+      const turnId = this.gatherTurns.insertQuestion({
+        sessionId: this.getId(),
+        roleId: args.roleId,
+        turnKind: 'done',
+        question: null,
+      })
+      void turnId
+      return { kind: 'done', reason: out!.result.reason }
+    }
+
+    const turnId = this.gatherTurns.insertQuestion({
+      sessionId: this.getId(),
+      roleId: args.roleId,
+      turnKind: 'followup',
+      question: out!.result.followUp,
+    })
+    return { kind: 'followup', turnId, question: out!.result.followUp }
+  }
+
+  recordGatherAnswer(args: { turnId: number; answer: string }): void {
+    if (this.state !== 'gather') throw new Error('not allowed: not in gather state')
+    this.db.transaction(() => {
+      this.gatherTurns.recordAnswer(args.turnId, args.answer)
+      this.applyEvent({ type: 'USER_MESSAGE', text: args.answer })
+    })()
+  }
+
+  skipGatherRole(args: { roleId: string }): void {
+    if (this.state !== 'gather') throw new Error('not allowed: not in gather state')
+    this.gatherTurns.insertSkip({ sessionId: this.getId(), roleId: args.roleId })
+  }
+
+  endGather(): void {
+    if (this.state !== 'gather') throw new Error('not allowed: not in gather state')
+    this.applyEvent({ type: 'BEGIN_CRITIQUE' })
+  }
+
+  /** Delegate to the sessions repo — convenience for tests. */
+  setGatherEnabled(enabled: boolean): void {
+    this.sessions.setGatherEnabled(this.getId(), enabled)
   }
 
   acceptFlag(args: {
@@ -573,6 +739,53 @@ export class Session {
     this.applyEvent({ type: 'END_INTERROGATION' })
   }
 
+  // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  /** Find a role by id in the current resume. */
+  private findRole(roleId: string): Resume['roles'][number] | null {
+    return this.currentResume().roles.find((r) => r.id === roleId) ?? null
+  }
+
+  /** Build the persona system prompt for the current session. */
+  private async buildSystemPrompt(): Promise<string> {
+    const row = this.sessions.get(this.id)
+    const target = row?.targetContext as TargetContext | null
+    if (!target) throw new Error('No target context — call setTarget first')
+    return buildPersonaSystemPrompt(target.persona, {})
+  }
+
+  /** Serialize the current target context as a JSON string for template slots. */
+  private targetContextString(): string {
+    const row = this.sessions.get(this.id)
+    if (!row?.targetContext) return ''
+    return JSON.stringify(row.targetContext, null, 2)
+  }
+
+  /**
+   * Best-effort telemetry write. Called in the `finally` block of adapter calls.
+   * Matches the pattern in `runCritique` / `ingestResume`.
+   */
+  private recordTelemetry(templateName: string, callStartMs: number): void {
+    try {
+      this.modelCalls.record({
+        sessionId: this.id,
+        templateName,
+        provider: this.adapter.name,
+        tier: 'main',
+        tokensInEstimate: null,
+        tokensOutEstimate: null,
+        latencyMs: Date.now() - callStartMs,
+        validationFailures: 0,
+        verifierRejections: 0,
+      })
+      this.sessions.incrementCalls(this.id)
+    } catch (e) {
+      console.warn(`[session] telemetry write failed: ${(e as Error).message}`)
+    }
+  }
+
   /** Locate a bullet across roles and projects by id. */
   private findBullet(
     resume: Resume,
@@ -680,4 +893,22 @@ async function loadRewriteWordsmithTemplate(): Promise<string> {
     join(PROMPTS_DIR, 'templates/rewrite-wordsmith.md'),
   ).text()
   return cachedRewriteTemplate
+}
+
+let cachedGatherBroad: string | null = null
+async function loadGatherBroadTemplate(): Promise<string> {
+  if (cachedGatherBroad) return cachedGatherBroad
+  cachedGatherBroad = await Bun.file(
+    join(PROMPTS_DIR, 'templates/gather-broad.md'),
+  ).text()
+  return cachedGatherBroad
+}
+
+let cachedGatherFollowup: string | null = null
+async function loadGatherFollowupTemplate(): Promise<string> {
+  if (cachedGatherFollowup) return cachedGatherFollowup
+  cachedGatherFollowup = await Bun.file(
+    join(PROMPTS_DIR, 'templates/gather-followup.md'),
+  ).text()
+  return cachedGatherFollowup
 }
