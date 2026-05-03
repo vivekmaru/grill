@@ -283,3 +283,47 @@ Phase: 2e.
 **Transitional gate:** `sessions.gather_enabled` defaults to `1` for sessions created via `Session.create`, but `POST /api/sessions` defaults to opting OUT (passes `setGatherEnabled(false)` unless the body sends `gather: true`). This keeps the existing thin-slice route/e2e tests green; the frontend SetupScreen sends `gather: true` so real users hit the new flow. Plan: flip the route default once gather has soaked.
 
 Phase: 3a.
+
+## Sub-plan 3b: Evidenced rewrites + numbers verifier
+
+The four evidence flags (`unverified, no-impact, inflated, stale`) get a separate template (`rewrite-evidenced.md`) that pulls the role's gather answers into the prompt as a `{{evidence}}` block. After the LLM returns candidates, a deterministic verifier — `extractNumbers(candidate.text) ⊆ extractNumbers(original) ∪ extractNumbers(evidence)` — rejects anything that smuggled in numbers. One retry with the rejected tokens echoed back; if the second attempt still fabricates, surface `VerifierFailedError` (HTTP 422).
+
+**Why deterministic verification:** The persona prompt forbids new metrics, but prompt rules are advisory. The verifier is a hard line that doesn't depend on the model's compliance.
+
+Phase: 3b.
+
+## Sub-plan 3d: JD overlay
+
+`buildJdOverlay(target)` composes a role + JD paragraph that fills the existing `{{#if jdOverlay}}` block in `persona-system.md`. Wired into all four adapter call sites (ingest, critique, both rewrites). Empty/absent JD makes the helper return `''`, which collapses the conditional cleanly.
+
+Phase: 3d.
+
+## Sub-plan 3e: Final review embedded in endInterrogation
+
+`endInterrogation` is now async: it asserts no severity-2+ flags remain unresolved (`BlockingFlagsError → 409 final_review_blocked`), runs the `final-review.md` template, persists the result on the session, and emits `END_INTERROGATION` to land in `generate`. `dismissFlag` now refuses severity-3 flags without `confirmSeverity3: true` (HTTP 409 `severity_3_confirmation_required`).
+
+**Why bake review into end:** A two-step "run review then confirm" tempted users to skip review. Folding it into `/end` makes review unskippable while keeping a single client action.
+
+**Flag taxonomy expanded** to 13 types: evidence (`unverified, no-impact, inflated, stale, specificity, seniority-mismatch, jd-mismatch, metric-risk`) and wording (`vague, passive, length, jargon, wording-weakness`). The new types lean on JD context, so `jd-mismatch` only fires when the user provides a JD.
+
+Phase: 3e.
+
+## Sub-plan 3f: Persona suggestion
+
+Stateless `POST /api/persona/propose` route — no session row created. Takes target role + optional JD, returns `{archetype, tone, rationale}`. SetupScreen offers a "Suggest persona from JD" button that fills the dropdowns; the user can override.
+
+Phase: 3f.
+
+## Sub-plan 3c: PDF ingest via unpdf
+
+`CreateSessionBody.resume` gains `{kind: 'pdf', data: base64}`. `Session.ingestResume` extracts text via `unpdf` (pure-JS PDF.js wrapper) and falls through to the existing markdown ingest. Image-only PDFs surface a clear error pointing the user to paste markdown.
+
+**Why unpdf over pdf-parse:** `pdf-parse` ships Node-only fs assumptions; `unpdf` runs cleanly under Bun and Cloudflare Workers, with no native deps.
+
+Phase: 3c.
+
+## Sub-plan 3g: Rubric tuning
+
+`flags.md` covers all 13 flag types with disambiguation guidance for close pairs (`vague` vs `specificity`, `unverified` vs `metric-risk`). `core.md` adds signal-strength calibration cues and a JD calibration note that prefers JD-relevant flags over generic hygiene when a job description is present. Content-only — no code change.
+
+Phase: 3g.
