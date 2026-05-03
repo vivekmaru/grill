@@ -7,6 +7,7 @@ export const CreateSessionBody = z.object({
     z.object({ kind: z.literal('blank') }),
   ]),
   target: TargetContext,
+  gather: z.boolean().optional(),
 })
 export type CreateSessionBody = z.infer<typeof CreateSessionBody>
 

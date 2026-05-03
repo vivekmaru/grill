@@ -55,6 +55,7 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
           jobDescription: values.jobDescription || undefined,
           persona: { archetype: values.archetype, tone: values.tone },
         },
+        gather: true,
       }
       const parsed = CreateSessionBody.parse(body)
       return createSession(parsed)

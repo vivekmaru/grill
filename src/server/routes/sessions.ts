@@ -20,9 +20,11 @@ export function sessionsRoutes(deps: AppDeps): Hono {
     try {
       const session = Session.create(deps.db, deps.adapter)
       await session.ingestResume(parsed.data.resume)
-      // Gather is not yet wired into this route (T4). Disable so setTarget
-      // auto-transitions to critique, preserving pre-gather behaviour.
-      session.setGatherEnabled(false)
+      // Gather is opt-in via body.gather === true. Default is the legacy
+      // fast-path straight to critique, keeping existing client/test
+      // expectations stable until the frontend opts in explicitly.
+      const enableGather = parsed.data.gather === true
+      session.setGatherEnabled(enableGather)
       session.setTarget(parsed.data.target)
       const snapshot = session.snapshot()
       const resume = session.currentResume()
