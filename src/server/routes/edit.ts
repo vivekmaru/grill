@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { Session } from '@/orchestrator/session'
 import { EditBulletBody } from '@/server/schemas/routes'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import type { AppDeps } from '@/server/deps'
 
 export function editRoutes(deps: AppDeps): Hono {
@@ -22,7 +24,7 @@ export function editRoutes(deps: AppDeps): Hono {
     if (!parsed.success) return respondWithError(c, parsed.error)
 
     try {
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       session.editBullet({
         bulletId: parsed.data.bulletId,
         newText: parsed.data.newText,

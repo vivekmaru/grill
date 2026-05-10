@@ -5,6 +5,8 @@ import {
   DismissFlagBody,
 } from '@/server/schemas/routes'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import type { AppDeps } from '@/server/deps'
 import type { Context } from 'hono'
 
@@ -44,7 +46,7 @@ export function flagsRoutes(deps: AppDeps): Hono {
     if (!parsed.success) return respondWithError(c, parsed.error)
 
     try {
-      const session = Session.load(deps.db, deps.adapter, ids.id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, ids.id)), ids.id)
       session.acceptFlag({
         bulletId: ids.bulletId,
         flagIndex: ids.flagIdx,
@@ -62,7 +64,7 @@ export function flagsRoutes(deps: AppDeps): Hono {
       return c.json({ error: { code: 'validation', message: ids.reason } }, 400)
     }
     try {
-      const session = Session.load(deps.db, deps.adapter, ids.id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, ids.id)), ids.id)
       session.skipFlag({ bulletId: ids.bulletId, flagIndex: ids.flagIdx })
       return c.json({ ok: true })
     } catch (e) {
@@ -84,7 +86,7 @@ export function flagsRoutes(deps: AppDeps): Hono {
     const parsed = DismissFlagBody.safeParse(body)
     if (!parsed.success) return respondWithError(c, parsed.error)
     try {
-      const session = Session.load(deps.db, deps.adapter, ids.id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, ids.id)), ids.id)
       session.dismissFlag({
         bulletId: ids.bulletId,
         flagIndex: ids.flagIdx,
@@ -103,7 +105,7 @@ export function flagsRoutes(deps: AppDeps): Hono {
       return c.json({ error: { code: 'validation', message: ids.reason } }, 400)
     }
     try {
-      const session = Session.load(deps.db, deps.adapter, ids.id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, ids.id)), ids.id)
       const result = await session.proposeRewrites({
         bulletId: ids.bulletId,
         flagIndex: ids.flagIdx,

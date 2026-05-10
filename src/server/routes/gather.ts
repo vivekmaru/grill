@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { Session } from '@/orchestrator/session'
 import { GatherAnswerBody } from '@/server/schemas/routes'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import type { AppDeps } from '@/server/deps'
 
 const SessionIdParam = z.coerce.number().int().positive()
@@ -18,7 +20,7 @@ export function gatherRoutes(deps: AppDeps): Hono {
     try {
       const id = parseSessionId(c.req.param('id'))
       const roleId = c.req.param('roleId')
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       const result = await session.nextGatherQuestion({ roleId })
       return c.json(result)
     } catch (e) {
@@ -37,7 +39,7 @@ export function gatherRoutes(deps: AppDeps): Hono {
       }
       const parsed = GatherAnswerBody.safeParse(body)
       if (!parsed.success) return respondWithError(c, parsed.error)
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       session.recordGatherAnswer(parsed.data)
       return c.json({ ok: true })
     } catch (e) {
@@ -49,7 +51,7 @@ export function gatherRoutes(deps: AppDeps): Hono {
     try {
       const id = parseSessionId(c.req.param('id'))
       const roleId = c.req.param('roleId')
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       session.skipGatherRole({ roleId })
       return c.json({ ok: true })
     } catch (e) {
@@ -60,7 +62,7 @@ export function gatherRoutes(deps: AppDeps): Hono {
   router.post('/:id/gather/end', (c) => {
     try {
       const id = parseSessionId(c.req.param('id'))
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       session.endGather()
       return c.json({ snapshot: session.snapshot() })
     } catch (e) {

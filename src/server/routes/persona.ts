@@ -6,6 +6,7 @@ import { render } from '@/prompts/render'
 import { PersonaProposeOutput } from '@/orchestrator/outputs'
 import { Seniority } from '@/schema/target'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
 import type { AppDeps } from '@/server/deps'
 
 export const PersonaProposeBody = z.object({
@@ -48,7 +49,7 @@ export function personaRoutes(deps: AppDeps): Hono {
         job_description: parsed.data.jobDescription ?? '(not provided)',
         output_schema: JSON.stringify(zodToJsonSchema(PersonaProposeOutput)),
       })
-      const out = await deps.adapter.callInSession({
+      const out = await resolveAdapter(deps.adapters, 'codex').callInSession({
         sessionHandle: null,
         tier: 'main',
         systemPrompt:

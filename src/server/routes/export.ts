@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { Session } from '@/orchestrator/session'
 import type { AppDeps } from '@/server/deps'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import { respondWithError } from '@/server/errors'
 import type { Resume } from '@/schema/resume'
 
@@ -148,7 +150,7 @@ export function exportRoutes(deps: AppDeps): Hono {
       return c.json({ error: { code: 'validation' } }, 400)
     }
     try {
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       const pdf = buildPdf(session.currentResume())
       const body = pdf.buffer.slice(
         pdf.byteOffset,

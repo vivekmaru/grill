@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'bun:test'
 import { buildTestApp, jsonRequest } from './_helpers'
 import { sampleResumeJson, sampleTarget } from './_fixtures'
+import { createDb } from '@/server/db/client'
+import { createApp } from '@/server/index'
+import { createStubAdapter } from '../../orchestrator/_helpers/stubAdapter'
 
 describe('end-to-end: setup → critique → accept → edit → end', () => {
   it('walks the full happy path through every route', async () => {
@@ -108,5 +111,38 @@ describe('end-to-end: setup → critique → accept → edit → end', () => {
       new Uint8Array(await exp.arrayBuffer()).slice(0, 8),
     )
     expect(header).toBe('%PDF-1.4')
+  })
+
+  it('creates session with provider: claude and stores it', async () => {
+    const { fetch, stub } = buildTestApp()
+    stub.responses.push({ type: 'ok', value: sampleResumeJson })
+    const res = await fetch(
+      jsonRequest('POST', '/api/sessions', {
+        resume: { kind: 'markdown', text: '# Hi' },
+        target: sampleTarget,
+        provider: 'claude',
+      }),
+    )
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { snapshot: { provider: string } }
+    expect(body.snapshot.provider).toBe('claude')
+  })
+
+  it('falls back to codex when requested provider is not in adapters map', async () => {
+    const db = createDb(':memory:')
+    const stub = createStubAdapter([], { name: 'codex' })
+    const app = createApp({ db, adapters: { codex: stub.adapter } })
+    stub.responses.push({ type: 'ok', value: sampleResumeJson })
+
+    const res = await app.fetch(
+      jsonRequest('POST', '/api/sessions', {
+        resume: { kind: 'markdown', text: '# Hi' },
+        target: sampleTarget,
+        provider: 'claude',
+      }),
+    )
+    expect(res.status).toBe(201)
+    const body = (await res.json()) as { snapshot: { provider: string } }
+    expect(body.snapshot.provider).toBe('codex')
   })
 })

@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { Session } from '@/orchestrator/session'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import type { AppDeps } from '@/server/deps'
 
 export function endRoutes(deps: AppDeps): Hono {
@@ -12,7 +14,7 @@ export function endRoutes(deps: AppDeps): Hono {
       return c.json({ error: { code: 'validation' } }, 400)
     }
     try {
-      const session = Session.load(deps.db, deps.adapter, id)
+      const session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
       const review = await session.endInterrogation()
       return c.json({ snapshot: session.snapshot(), review })
     } catch (e) {

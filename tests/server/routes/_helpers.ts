@@ -15,9 +15,18 @@ export interface TestApp {
 export function buildTestApp(): TestApp {
   const db = createDb(':memory:')
   const stub = createStubAdapter([], { name: 'codex' })
-  // Both 'codex' and 'claude' point to the same stub so tests that
-  // specify provider: 'claude' still hit the same response queue.
-  const app = createApp({ db, adapters: { codex: stub.adapter, claude: stub.adapter } })
+  // Build a claude-named adapter that shares the same response queue so tests
+  // that specify provider: 'claude' hit the same stubs but get adapter.name === 'claude'.
+  const claudeStub = createStubAdapter([], { name: 'claude' })
+  // Share the response queue so pushes on stub.responses are visible to both.
+  const claudeAdapter = { ...claudeStub.adapter }
+  // Wrap callInSession to pull from the shared queue.
+  const originalCall = stub.adapter.callInSession.bind(stub.adapter)
+  claudeAdapter.callInSession = (args) => {
+    // Delegate to the codex stub so it pulls from stub.responses
+    return originalCall(args)
+  }
+  const app = createApp({ db, adapters: { codex: stub.adapter, claude: claudeAdapter } })
   return {
     fetch: async (req) => app.fetch(req),
     db,

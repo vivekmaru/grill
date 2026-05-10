@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { Session } from '@/orchestrator/session'
 import { CreateSessionBody } from '@/server/schemas/routes'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import type { AppDeps } from '@/server/deps'
 
 export function sessionsRoutes(deps: AppDeps): Hono {
@@ -18,11 +20,9 @@ export function sessionsRoutes(deps: AppDeps): Hono {
     if (!parsed.success) return respondWithError(c, parsed.error)
 
     try {
-      const session = Session.create(deps.db, deps.adapter)
+      const adapter = resolveAdapter(deps.adapters, parsed.data.provider)
+      const session = Session.create(deps.db, adapter)
       await session.ingestResume(parsed.data.resume)
-      // Gather is opt-in via body.gather === true. Default is the legacy
-      // fast-path straight to critique, keeping existing client/test
-      // expectations stable until the frontend opts in explicitly.
       const enableGather = parsed.data.gather === true
       session.setGatherEnabled(enableGather)
       session.setTarget(parsed.data.target)
@@ -44,7 +44,9 @@ export function sessionsRoutes(deps: AppDeps): Hono {
       )
     }
     try {
-      const session = Session.load(deps.db, deps.adapter, id)
+      const provider = getSessionProvider(deps.db, id)
+      const adapter = resolveAdapter(deps.adapters, provider)
+      const session = Session.load(deps.db, adapter, id)
       const snapshot = session.snapshot()
       const resume = session.currentResume()
       return c.json({ snapshot, resume })

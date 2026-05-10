@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { Session } from '@/orchestrator/session'
 import { respondWithError } from '@/server/errors'
+import { resolveAdapter } from '@/server/deps'
+import { getSessionProvider } from '@/server/db/repositories/sessions'
 import type { AppDeps } from '@/server/deps'
 
 export const CRITIQUE_SSE_KEEPALIVE_MS = 5_000
@@ -20,7 +22,7 @@ export function critiqueRoutes(deps: AppDeps): Hono {
 
     let session: Session
     try {
-      session = Session.load(deps.db, deps.adapter, id)
+      session = Session.load(deps.db, resolveAdapter(deps.adapters, getSessionProvider(deps.db, id)), id)
     } catch (e) {
       return respondWithError(c, e)
     }

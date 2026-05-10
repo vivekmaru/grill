@@ -9,6 +9,7 @@ export const CreateSessionBody = z.object({
   ]),
   target: TargetContext,
   gather: z.boolean().optional(),
+  provider: z.enum(['claude', 'codex']).default('codex'),
 })
 export type CreateSessionBody = z.infer<typeof CreateSessionBody>
 
