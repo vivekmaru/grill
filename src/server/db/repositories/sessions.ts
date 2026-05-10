@@ -150,3 +150,19 @@ export function createSessionRepo(db: Database): SessionRepo {
     },
   }
 }
+
+/**
+ * Quick single-column read used by route handlers to resolve the right
+ * adapter before calling Session.load. Returns 'codex' if the provider
+ * column is NULL (shouldn't happen post-creation, but safe fallback).
+ * Throws if the session row doesn't exist.
+ */
+export function getSessionProvider(db: Database, id: number): string {
+  const row = db
+    .query<{ provider: string | null }, [number]>(
+      'SELECT provider FROM sessions WHERE id = ?',
+    )
+    .get(id)
+  if (!row) throw new Error(`Session not found: ${id}`)
+  return row.provider ?? 'codex'
+}
