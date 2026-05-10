@@ -14,5 +14,7 @@ export function resolveAdapter(
   adapters: Record<string, ProviderAdapter>,
   provider: string,
 ): ProviderAdapter {
-  return adapters[provider] ?? adapters['codex']!
+  const adapter = adapters[provider] ?? adapters['codex']
+  if (!adapter) throw new Error(`No adapter for "${provider}" and codex fallback missing`)
+  return adapter
 }
