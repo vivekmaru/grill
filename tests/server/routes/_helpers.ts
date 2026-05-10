@@ -15,7 +15,9 @@ export interface TestApp {
 export function buildTestApp(): TestApp {
   const db = createDb(':memory:')
   const stub = createStubAdapter([], { name: 'codex' })
-  const app = createApp({ db, adapter: stub.adapter })
+  // Both 'codex' and 'claude' point to the same stub so tests that
+  // specify provider: 'claude' still hit the same response queue.
+  const app = createApp({ db, adapters: { codex: stub.adapter, claude: stub.adapter } })
   return {
     fetch: async (req) => app.fetch(req),
     db,
