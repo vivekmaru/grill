@@ -19,7 +19,6 @@ const booleanString = (defaultValue: boolean) =>
     })
 
 const EnvSchema = z.object({
-  AI_PROVIDER: z.enum(['claude', 'codex', 'gemini']).default('codex'),
   CLAUDE_BIN: z.string().default('claude'),
   GEMINI_BIN: z.string().default('gemini'),
   OPENAI_BIN: z.string().default('codex'),

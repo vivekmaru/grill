@@ -3,6 +3,7 @@ import { createApp } from './index'
 import { createDb } from './db/client'
 import { loadEnv, type Env } from '@/lib/env'
 import { createCodexAdapter } from '@/prompts/adapters/codex'
+import { createClaudeAdapter } from '@/prompts/adapters/claude'
 import type { ProviderAdapter } from '@/prompts/adapters/types'
 import type { Resume } from '@/schema/resume'
 
@@ -97,30 +98,68 @@ function createMockCodexAdapter(): ProviderAdapter {
   }
 }
 
-export function createDevAdapter(
+async function probeCliAvailable(bin: string): Promise<boolean> {
+  try {
+    const proc = Bun.spawn([bin, '--version'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    return (await proc.exited) === 0
+  } catch {
+    return false
+  }
+}
+
+export async function createDevAdapters(
   env: Env,
   processEnv: Record<string, string | undefined> = process.env,
-): ProviderAdapter {
+): Promise<Record<string, ProviderAdapter>> {
   if (processEnv.RESUME_BUILDER_MOCK_CODEX === '1') {
-    return createMockCodexAdapter()
+    const mock = createMockCodexAdapter()
+    return { codex: mock, claude: mock }
   }
-  if (env.AI_PROVIDER !== 'codex') {
-    console.warn(
-      `[dev] AI_PROVIDER=${env.AI_PROVIDER} is inactive in Phase 2; using codex.`,
-    )
-  }
-  return createCodexAdapter({
+
+  const [codexAvailable, claudeAvailable] = await Promise.all([
+    probeCliAvailable(env.OPENAI_BIN),
+    probeCliAvailable(env.CLAUDE_BIN),
+  ])
+
+  const adapters: Record<string, ProviderAdapter> = {}
+
+  // Codex is always included as the default — even if the probe failed,
+  // we still construct it so the server boots; runtime errors surface naturally.
+  adapters['codex'] = createCodexAdapter({
     bin: env.OPENAI_BIN,
     mainModel: env.OPENAI_MAIN_MODEL,
     verifierModel: env.OPENAI_VERIFIER_MODEL,
   })
+
+  if (claudeAvailable) {
+    try {
+      adapters['claude'] = createClaudeAdapter({
+        bin: env.CLAUDE_BIN,
+        bareMode: env.CLAUDE_BARE_MODE,
+        apiKey: processEnv.ANTHROPIC_API_KEY,
+        mainModel: env.ANTHROPIC_MAIN_MODEL,
+        verifierModel: env.ANTHROPIC_VERIFIER_MODEL,
+      })
+    } catch (e) {
+      console.warn(`[dev] Claude adapter skipped: ${(e as Error).message}`)
+    }
+  }
+
+  if (!codexAvailable) {
+    console.warn(`[dev] codex binary not found at "${env.OPENAI_BIN}" — sessions may fail`)
+  }
+
+  return adapters
 }
 
 if (import.meta.main) {
   const env = loadEnv(process.env)
   const db = createDb(process.env.DATABASE_FILE ?? './dev.db')
-  const adapter = createDevAdapter(env)
-  const app = createApp({ db, adapter })
+  const adapters = await createDevAdapters(env)
+  const app = createApp({ db, adapters })
 
   const server = Bun.serve({
     port: Number(process.env.PORT ?? env.PORT),
@@ -130,10 +169,11 @@ if (import.meta.main) {
     development: { hmr: true, console: true },
   })
 
+  const providerList = Object.keys(adapters).join(', ')
   console.log(`resume-builder dev server: http://localhost:${server.port}`)
   console.log(
     process.env.RESUME_BUILDER_MOCK_CODEX === '1'
-      ? 'using mock Codex adapter'
-      : `using Codex adapter (${env.OPENAI_BIN}, ${env.OPENAI_MAIN_MODEL})`,
+      ? 'using mock adapter (both providers)'
+      : `available providers: ${providerList}`,
   )
 }
