@@ -4,7 +4,6 @@ import { loadEnv } from '@/lib/env'
 describe('loadEnv', () => {
   it('parses a complete env block', () => {
     const env = loadEnv({
-      AI_PROVIDER: 'claude',
       CLAUDE_BIN: 'claude',
       GEMINI_BIN: 'gemini',
       OPENAI_BIN: 'codex',
@@ -19,7 +18,6 @@ describe('loadEnv', () => {
       NODE_ENV: 'development',
       MAX_MODEL_CALLS_PER_SESSION: '60',
     })
-    expect(env.AI_PROVIDER).toBe('claude')
     expect(env.PORT).toBe(4321)
     expect(env.CLAUDE_BARE_MODE).toBe(true)
     expect(env.MAX_MODEL_CALLS_PER_SESSION).toBe(60)
@@ -27,16 +25,11 @@ describe('loadEnv', () => {
 
   it('applies defaults for unset values', () => {
     const env = loadEnv({})
-    expect(env.AI_PROVIDER).toBe('codex')
     expect(env.OPENAI_BIN).toBe('codex')
     expect(env.OPENAI_MAIN_MODEL).toBe('gpt-5')
     expect(env.PORT).toBe(4321)
     expect(env.NODE_ENV).toBe('development')
     expect(env.CLAUDE_BARE_MODE).toBe(true)
-  })
-
-  it('rejects an unknown AI_PROVIDER', () => {
-    expect(() => loadEnv({ AI_PROVIDER: 'cohere' })).toThrow()
   })
 
   it('rejects a non-numeric PORT', () => {

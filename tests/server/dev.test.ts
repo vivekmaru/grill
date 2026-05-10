@@ -1,21 +1,25 @@
 import { describe, it, expect } from 'bun:test'
 import { loadEnv } from '@/lib/env'
 import {
-  createDevAdapter,
+  createDevAdapters,
   DEV_SERVER_IDLE_TIMEOUT_SECONDS,
 } from '@/server/dev'
 
-describe('createDevAdapter', () => {
-  it('uses the Codex adapter by default', () => {
-    const adapter = createDevAdapter(loadEnv({}))
-    expect(adapter.name).toBe('codex')
-  })
-
-  it('uses the mock Codex stub when RESUME_BUILDER_MOCK_CODEX=1', () => {
-    const adapter = createDevAdapter(loadEnv({}), {
+describe('createDevAdapters', () => {
+  it('always includes the codex adapter', async () => {
+    const adapters = await createDevAdapters(loadEnv({}), {
       RESUME_BUILDER_MOCK_CODEX: '1',
     })
-    expect(adapter.name).toBe('codex')
+    expect(adapters['codex']).toBeDefined()
+    expect(adapters['codex']!.name).toBe('codex')
+  })
+
+  it('includes both codex and claude when RESUME_BUILDER_MOCK_CODEX=1', async () => {
+    const adapters = await createDevAdapters(loadEnv({}), {
+      RESUME_BUILDER_MOCK_CODEX: '1',
+    })
+    expect(adapters['codex']).toBeDefined()
+    expect(adapters['claude']).toBeDefined()
   })
 
   it('keeps dev connections open long enough for live Codex SSE calls', () => {
