@@ -6,12 +6,12 @@ export function App() {
   const [sessionId, setSessionId] = useState<number | null>(null)
 
   return (
-    <main className="min-h-screen bg-background py-8">
+    <div style={{ minHeight: '100vh', background: '#09090b' }}>
       {sessionId ? (
         <SessionScreen sessionId={sessionId} />
       ) : (
         <SetupScreen onSessionCreated={(session) => setSessionId(session.id)} />
       )}
-    </main>
+    </div>
   )
 }
