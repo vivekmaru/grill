@@ -9,9 +9,10 @@ export const CreateSessionBody = z.object({
   ]),
   target: TargetContext,
   gather: z.boolean().optional(),
-  provider: z.enum(['claude', 'codex']).default('codex'),
+  provider: z.enum(['claude', 'codex']).optional().default('codex'),
 })
 export type CreateSessionBody = z.infer<typeof CreateSessionBody>
+export type CreateSessionInput = z.input<typeof CreateSessionBody>
 
 export const AcceptFlagBody = z.object({
   newText: z.string().min(1),

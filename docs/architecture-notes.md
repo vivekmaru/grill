@@ -322,6 +322,30 @@ Phase: 3f.
 
 Phase: 3c.
 
+## Phase 4: Multi-Provider Support (2026-05-11)
+
+**Decision:** `AppDeps` now holds `adapters: Record<string, ProviderAdapter>` (a map keyed by provider name) instead of a single `adapter`. Each session stores its chosen provider in `sessions.provider` (TEXT, nullable). All session routes call `getSessionProvider(db, id)` → `resolveAdapter(adapters, provider)` before `Session.load`.
+
+**Why an adapter map at boot, not per-request construction:** CLIs are slow to spawn. Constructing adapters once at startup (after probing `--version`) keeps request latency predictable. The map also supports N providers without adding route parameters or global env vars.
+
+**`AI_PROVIDER` env var removed:** Provider selection moved entirely to the per-session UI picker. The env var was incompatible with per-session choice and was removed during Phase 4.
+
+**Gemini deferred:** Gemini CLI does not support `--output-schema` or equivalent schema-constrained JSON output as of Phase 4. The adapter interface requires structured responses, so Gemini stays unimplemented until the CLI supports it.
+
+**Codex is always the default and fallback:** `resolveAdapter` falls back to codex when the requested provider is not in the map. Codex is always probed and always included (warns if probe fails, never errors). Claude is included only when its CLI binary passes `--version`.
+
+**`GET /api/providers`** returns `{ available: string[], default: "codex" }`. The frontend uses this to disable unavailable providers in the picker.
+
+**`CreateSessionInput` vs `CreateSessionBody`:** `z.input<typeof CreateSessionBody>` is exported as `CreateSessionInput` (where `provider` is optional) for client-side code. `z.infer<>` (where `provider` is always present after defaulting) is used server-side. This avoids requiring callers to specify `provider` when they want the default.
+
+**Flag index correctness:** `SessionScreen` previously re-indexed flags after filtering dismissed ones, sending wrong indices to the server. Fix: map with original index from `bullet.flags` BEFORE filtering, pass `serverIdx` to route calls. Live-only streaming flags (not yet in server state) get `serverIdx: null` and have action buttons disabled until refetch.
+
+**BulletEditor sync + acceptFlag text:** Draft text now syncs via `useEffect` on `bullet.text` changes. `acceptFlag` now sends `rewriteText ?? bullet.text` so accepting after a rewrite applies the candidate.
+
+Phase: 4.
+
+---
+
 ## Sub-plan 3g: Rubric tuning
 
 `flags.md` covers all 13 flag types with disambiguation guidance for close pairs (`vague` vs `specificity`, `unverified` vs `metric-risk`). `core.md` adds signal-strength calibration cues and a JD calibration note that prefers JD-relevant flags over generic hygiene when a job description is present. Content-only — no code change.

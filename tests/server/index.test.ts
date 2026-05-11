@@ -4,7 +4,8 @@ import { createDb } from '@/server/db/client'
 import { createStubAdapter } from '../orchestrator/_helpers/stubAdapter'
 
 function makeApp() {
-  return createApp({ db: createDb(':memory:'), adapter: createStubAdapter([]).adapter })
+  const stub = createStubAdapter([])
+  return createApp({ db: createDb(':memory:'), adapters: { codex: stub.adapter } })
 }
 
 describe('app', () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Resume, Bullet } from '@/schema/resume'
 import type { FlagInstance } from '@/schema/flags'
@@ -41,7 +41,9 @@ const REWRITABLE_FLAGS = new Set([
   'stale',
 ])
 
-function flagActionKey(bulletId: string, flagIndex: number): string {
+type IndexedFlag = { flag: FlagInstance; serverIdx: number | null }
+
+function flagActionKey(bulletId: string, flagIndex: number | string): string {
   return `${bulletId}:${flagIndex}`
 }
 
@@ -75,6 +77,7 @@ function BulletEditor({
   onChanged: () => void
 }) {
   const [text, setText] = useState(bullet.text)
+  useEffect(() => { setText(bullet.text) }, [bullet.text])
   const edit = useMutation({
     mutationFn: () => editBullet({ sessionId, bulletId: bullet.id, newText: text }),
     onSuccess: onChanged,
@@ -106,6 +109,7 @@ function FlagActions({
   bullet,
   flag,
   flagIndex,
+  isLive = false,
   onChanged,
   onProcessed,
 }: {
@@ -113,6 +117,7 @@ function FlagActions({
   bullet: Bullet
   flag: FlagInstance
   flagIndex: number
+  isLive?: boolean
   onChanged: () => void
   onProcessed: () => void
 }) {
@@ -124,7 +129,7 @@ function FlagActions({
         sessionId,
         bulletId: bullet.id,
         flagIndex,
-        newText: bullet.text,
+        newText: rewriteText ?? bullet.text,
       }),
     onSuccess: () => {
       onProcessed()
@@ -162,6 +167,7 @@ function FlagActions({
         <Button
           type="button"
           size="sm"
+          disabled={isLive}
           data-testid={`accept-${bullet.id}-${flagIndex}`}
           onClick={() => accept.mutate()}
         >
@@ -171,6 +177,7 @@ function FlagActions({
           type="button"
           variant="outline"
           size="sm"
+          disabled={isLive}
           data-testid={`skip-${bullet.id}-${flagIndex}`}
           onClick={() => skip.mutate()}
         >
@@ -180,6 +187,7 @@ function FlagActions({
           type="button"
           variant="outline"
           size="sm"
+          disabled={isLive}
           data-testid={`dismiss-${bullet.id}-${flagIndex}`}
           onClick={() => dismiss.mutate()}
         >
@@ -190,6 +198,7 @@ function FlagActions({
             type="button"
             variant="outline"
             size="sm"
+            disabled={isLive}
             data-testid={`rewrite-${bullet.id}-${flagIndex}`}
             onClick={() => rewrite.mutate()}
           >
@@ -217,9 +226,9 @@ export function SessionScreen({ sessionId }: SessionScreenProps) {
     queryFn: () => getSession(sessionId),
   })
 
-  const invalidate = () => {
+  const invalidate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ['session', sessionId] })
-  }
+  }, [queryClient, sessionId])
 
   const critique = useMutation({
     mutationFn: () =>
@@ -357,27 +366,38 @@ export function SessionScreen({ sessionId }: SessionScreenProps) {
           <CardContent className="space-y-4">
             {bullets.flatMap(({ bullet }) => {
               const seen = new Set<string>()
-              const combinedFlags = [
-                ...bullet.flags.filter((flag) => !flag.dismissed),
-                ...liveFlags
-                  .filter((f) => f.bulletId === bullet.id)
-                  .map((f) => f.flag),
-              ].filter((flag) => {
-                const duplicateKey = `${flag.flag}:${flag.span}:${flag.why}`
-                if (seen.has(duplicateKey)) return false
-                seen.add(duplicateKey)
-                return true
-              })
-              return combinedFlags.flatMap((flag, flagIndex) => {
-                const actionKey = flagActionKey(bullet.id, flagIndex)
+              // Map with original index BEFORE filtering dismissed, so server indices are preserved
+              const serverFlags: IndexedFlag[] = bullet.flags
+                .map((flag, idx) => ({ flag, serverIdx: idx }))
+                .filter(({ flag }) => !flag.dismissed)
+                .filter(({ flag }) => {
+                  const key = `${flag.flag}:${flag.span}:${flag.why}`
+                  if (seen.has(key)) return false
+                  seen.add(key)
+                  return true
+                })
+              const liveOnlyFlags: IndexedFlag[] = liveFlags
+                .filter((f) => f.bulletId === bullet.id)
+                .map((f) => f.flag)
+                .filter((flag) => {
+                  const key = `${flag.flag}:${flag.span}:${flag.why}`
+                  if (seen.has(key)) return false
+                  seen.add(key)
+                  return true
+                })
+                .map((flag) => ({ flag, serverIdx: null }))
+              const displayFlags = [...serverFlags, ...liveOnlyFlags]
+              return displayFlags.flatMap(({ flag, serverIdx }, i) => {
+                const actionKey = flagActionKey(bullet.id, serverIdx ?? `live-${i}`)
                 if (processedFlags.has(actionKey)) return []
                 return [
                   <FlagActions
-                    key={`${bullet.id}-${flagIndex}-${flag.why}`}
+                    key={`${bullet.id}-${String(serverIdx ?? `live-${i}`)}-${flag.why}`}
                     sessionId={sessionId}
                     bullet={bullet}
                     flag={flag}
-                    flagIndex={flagIndex}
+                    flagIndex={serverIdx ?? -1}
+                    isLive={serverIdx === null}
                     onChanged={invalidate}
                     onProcessed={() =>
                       setProcessedFlags((prev) => new Set(prev).add(actionKey))

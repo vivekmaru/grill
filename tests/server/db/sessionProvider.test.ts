@@ -14,7 +14,6 @@ describe('getSessionProvider', () => {
 
   it('returns "codex" when provider is null (no provider locked yet)', () => {
     const db = createDb(':memory:')
-    const repo = createSessionRepo(db)
     // create a session but don't lock provider — insert directly to bypass lockProvider logic
     const id = db
       .query<{ id: number }, [string, number, number]>(
