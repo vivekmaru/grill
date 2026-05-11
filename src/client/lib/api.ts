@@ -1,4 +1,4 @@
-import type { CreateSessionBody } from '@/server/schemas/routes'
+import type { CreateSessionInput } from '@/server/schemas/routes'
 import type { Resume } from '@/schema/resume'
 import type { FlagInstance } from '@/schema/flags'
 
@@ -46,7 +46,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
-export async function createSession(body: CreateSessionBody): Promise<CreateSessionResponse> {
+export async function createSession(body: CreateSessionInput): Promise<CreateSessionResponse> {
   return requestJson<CreateSessionResponse>('/api/sessions', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -56,6 +56,15 @@ export async function createSession(body: CreateSessionBody): Promise<CreateSess
 
 export async function getSession(sessionId: number): Promise<SessionResponse> {
   return requestJson<SessionResponse>(`/api/sessions/${sessionId}`)
+}
+
+export interface ProvidersResponse {
+  available: string[]
+  default: string
+}
+
+export async function getProviders(): Promise<ProvidersResponse> {
+  return requestJson<ProvidersResponse>('/api/providers')
 }
 
 export type CritiqueStreamEvent =

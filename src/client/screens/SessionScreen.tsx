@@ -282,8 +282,16 @@ export function SessionScreen({ sessionId }: SessionScreenProps) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Session {sessionId}</h1>
-            <p className="text-sm text-muted-foreground">
-              {displayState} - {session.data.snapshot.provider ?? 'provider pending'}
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              {displayState}
+              {session.data.snapshot.provider && (
+                <span
+                  data-testid="provider-badge"
+                  className="inline-flex items-center rounded-full border border-input bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                >
+                  {session.data.snapshot.provider}
+                </span>
+              )}
             </p>
           </div>
           <div className="flex gap-2">

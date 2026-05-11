@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { CreateSessionBody } from '@/server/schemas/routes'
 import { Archetype, Tone, Seniority } from '@/schema/target'
 import {
   createSession,
+  getProviders,
   proposePersona,
   type CreateSessionResponse,
   type ApiError,
@@ -30,6 +31,7 @@ type FormValues = {
   jobDescription: string
   archetype: (typeof Archetype.options)[number]
   tone: (typeof Tone.options)[number]
+  provider: 'claude' | 'codex'
 }
 
 interface SetupScreenProps {
@@ -47,6 +49,7 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
       jobDescription: '',
       archetype: 'engineering-manager',
       tone: 'skeptical',
+      provider: 'codex',
     },
   })
 
@@ -66,6 +69,11 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
       if (Archetype.options.includes(arch)) form.setValue('archetype', arch)
       if (Tone.options.includes(tone)) form.setValue('tone', tone)
     },
+  })
+
+  const { data: providers } = useQuery({
+    queryKey: ['providers'],
+    queryFn: getProviders,
   })
 
   const [pdfData, setPdfData] = useState<string | null>(null)
@@ -94,6 +102,7 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
           jobDescription: values.jobDescription || undefined,
           persona: { archetype: values.archetype, tone: values.tone },
         },
+        provider: values.provider,
         gather: true,
       }
       const parsed = CreateSessionBody.parse(body)
@@ -207,6 +216,36 @@ export function SetupScreen({ onSessionCreated }: SetupScreenProps) {
               {proposeMut.data ? (
                 <span className="text-sm text-muted-foreground">{proposeMut.data.rationale}</span>
               ) : null}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Provider</Label>
+              <div className="flex gap-6">
+                {(['codex', 'claude'] as const).map((p) => {
+                  const available = providers?.available?.includes(p) ?? p === 'codex'
+                  return (
+                    <label
+                      key={p}
+                      className={`flex items-center gap-2 cursor-pointer ${
+                        !available ? 'opacity-40 cursor-not-allowed' : ''
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        value={p}
+                        disabled={!available}
+                        data-testid={`provider-${p}`}
+                        {...form.register('provider')}
+                        className="accent-primary"
+                      />
+                      <span className="text-sm capitalize">{p}</span>
+                      {!available && (
+                        <span className="text-xs text-muted-foreground">(not installed)</span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
